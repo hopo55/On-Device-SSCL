@@ -21,54 +21,73 @@ parser.add_argument('--mode', type=str, default='super')
 
 args = parser.parse_args()
 
-class DataGenerator():
-    def __init__(self, args, config):
-        self.config = config
-        self.train_datasets = {}
-        self.test_datasets = {}
-
-        self.train_datasets = DATASET[args.dataset](args, self.config)
-        self.test_datasets = DATASET[args.dataset](args, self.config, train=False)
-
-        self.task_datasets = []
-        for step in self.config:
-            subsets = []
-            for _, subset_name in step['subsets']:
-                subsets.append(self.train_datasets.subsets[subset_name])
-            
-            dataset = ConcatDataset(subsets)
-            self.task_datasets.append(dataset)
-
-    def __iter__(self):
-        for idx, task in enumerate(self.task_datasets):
-            print('\nProgressing to Task %d' % idx)
-            for data in DataLoader(task, batch_size=args.batch_size, num_workers=args.num_workers, drop_last=False, shuffle=False):
-                yield data, idx
-
-    def __len__(self):
-        return len(self.train_datasets)
-
-
 class CIFAR10(datasets.CIFAR10):
     name = 'CIFAR10'
     num_classes = 10
+
+    def __init__(self, args, train=True, semi=False):
+        pass
 
 class CIFAR100(datasets.CIFAR100):
     name = 'CIFAR100'
     num_classes = 100
 
-    def __init__(self, args, config, train=True):
+    def __init__(self, args, train=True, semi=False, lab=True):
         self.subsets = dict()
         transform = transforms.Compose([transforms.Resize((args.image_size, args.image_size)),
                                         transforms.ToTensor()])
         datasets.CIFAR100.__init__(self, root=os.path.join(args.root, args.dataset), train=train, transform=transform, download=True)
+        
+        if args.mode == 'super':
+            self.super_data = []
+            self.super_target = []
 
-        # Create subset for each class
-        for y in range(self.num_classes):
-            self.subsets[y] = Subset(self, torch.nonzero((torch.Tensor(self.targets) == y)).squeeze(1).tolist())
+            super_classes = [["beaver", "dolphin", "otter", "seal", "whale"],
+                            ["aquarium_fish", "flatfish", "ray", "shark", "trout"],
+                            ["orchid", "poppy", "rose", "sunflower", "tulip"],
+                            ["bottle", "bowl", "can", "cup", "plate"],
+                            ["apple", "mushroom", "orange", "pear", "sweet_pepper"],
+                            ["clock", "keyboard", "lamp", "telephone", "television"],
+                            ["bed", "chair", "couch", "table", "wardrobe"],
+                            ["bee", "beetle", "butterfly", "caterpillar", "cockroach"],
+                            ["bear", "leopard", "lion", "tiger", "wolf"],
+                            ["bridge", "castle", "house", "road", "skyscraper"],
+                            ["cloud", "forest", "mountain", "plain", "sea"],
+                            ["camel", "cattle", "chimpanzee", "elephant", "kangaroo"],
+                            ["fox", "porcupine", "possum", "raccoon", "skunk"],
+                            ["crab", "lobster", "snail", "spider", "worm"],
+                            ["baby", "boy", "girl", "man", "woman"],
+                            ["crocodile", "dinosaur", "lizard", "snake", "turtle"],
+                            ["hamster", "mouse", "rabbit", "shrew", "squirrel"],
+                            ["maple_tree", "oak_tree", "palm_tree", "pine_tree", "willow_tree"],
+                            ["bicycle", "bus", "motorcycle", "pickup_truck", "train"],
+                            ["lawn_mower", "rocket", "streetcar", "tank", "tractor"],]
+
+            for super_cls in super_classes:
+                sup_subset = []
+                cls_idx = [self.class_to_idx[c] for c in super_cls]
+                
+                for y in cls_idx:
+                    sup_classes = torch.nonzero(torch.Tensor(self.targets) == y)
+
+                    if train and semi:
+                        split_point = int(len(sup_classes)*args.label_ratio)
+                        if lab: sup_subset.append(sup_classes[:split_point])
+                        else: sup_subset.append(sup_classes[split_point:])
+                    else:
+                        sup_subset.append(sup_classes)
+
+                sup_subset = torch.cat(sup_subset).squeeze(1).tolist()
+            
+                self.super_data = [self.data[loc] for loc in sup_subset]
+                self.super_target = [self.targets[loc] for loc in sup_subset]
+
 
     def __getitem__(self, idx):
-        x, y = datasets.CIFAR100.__getitem__(self, idx)
+        if args.mode == 'super':
+            x, y = self.super_data[idx], self.super_target[idx]
+        else:
+            x, y = self.data[idx], self.targets[idx]
 
         return x, y
 
@@ -81,20 +100,16 @@ def CIFAR100_Generator():
     pass
 
 def CIFAR100_Generator():
-    config_path = args.config
-
-    config = yaml.load(open(config_path), Loader=yaml.FullLoader)
-
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
 
-    data_generator = DataGenerator(args, config)
-
-    for step, (x, y) in enumerate(data_generator):
-        print(y)
-        if step > 40:
-            break
+    print('Train Labeled Dataset Loading...')
+    train_datasets = DATASET[args.dataset](args, semi=True)
+    print('Train Unlabeled Dataset Loading...')
+    train_datasets = DATASET[args.dataset](args, semi=True, lab=False)
+    print('Test Dataset Loading...')
+    test_datasets = DATASET[args.dataset](args, train=False)
 
 if args.dataset == 'CIFAR10': CIFAR100_Generator()
 elif args.dataset == 'CIFAR100': CIFAR100_Generator()
