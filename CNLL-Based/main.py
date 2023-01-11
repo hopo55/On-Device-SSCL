@@ -9,15 +9,24 @@ import torch.backends.cudnn as cudnn
 
 from models import resnet
 from losses import SupConLoss
+import data_generator
 
 parser = argparse.ArgumentParser()
+# General Settings
 parser.add_argument('--gpuid', type=int, default=0)
 parser.add_argument('--seed', type=int, default=0)
+# Dataset Settings
+parser.add_argument('--root', type=str, default='./data/')
+parser.add_argument('--dataset', default='CIFAR100')
+parser.add_argument('--mode', type=str, default='super')
+parser.add_argument('--image_size', type=int, default=32)
+parser.add_argument('--label_ratio', type=float, default=0.2, help="Labeled data ratio")
+# Model Settings
 parser.add_argument('--num_class', type=int, default=100)
 parser.add_argument('--lr', '--learning_rate', type=float, default=0.0005) ### Learning Rate Should not be more than 0.001
-parser.add_argument('--dataset', default='CIFAR100')
 parser.add_argument('--buffer_size', type=int, default=0, help="size of buffer for replay")
 
+# Not yet used
 parser.add_argument('--batch_size', type=int, default=64)
 parser.add_argument('--num_workers', type=int, default=4)
 
@@ -33,6 +42,10 @@ def main():
     torch.cuda.manual_seed_all(args.seed)
     cudnn.benchmark = True
 
+    # Dataset Generator
+    data_generator.__dict__[args.dataset + '_Generator'](args)
+
+    # Create Model
     model = resnet.ResNet18(args.num_class)
 
     # Semi-Supervised Loss
