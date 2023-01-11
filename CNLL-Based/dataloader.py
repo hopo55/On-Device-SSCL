@@ -1,21 +1,16 @@
 import os
-import yaml
 import random
 import argparse
 import numpy as np
 
 import torch
 from torchvision import datasets, transforms
-from torch.utils.data import Dataset, ConcatDataset, Subset, DataLoader
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--seed', type=int, default=0)
-parser.add_argument('--config', '-c', default='configs/cifar100.yaml')
 parser.add_argument('--dataset', default='CIFAR100')
 parser.add_argument('--label_ratio', type=float, default=0.2, help="Labeled data ratio")
 parser.add_argument('--image_size', type=int, default=32)
-parser.add_argument('--batch_size', type=int, default=64)
-parser.add_argument('--num_workers', type=int, default=4)
 parser.add_argument('--root', type=str, default='./data/')
 parser.add_argument('--mode', type=str, default='super')
 
