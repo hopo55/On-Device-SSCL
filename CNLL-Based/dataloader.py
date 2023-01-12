@@ -1,7 +1,8 @@
+import os
+import autoaugment
+import numpy as np
 import torchvision.transforms as transforms
 from torch.utils.data import Dataset, DataLoader
-
-import autoaugment
 
 dataset_stats = {
     'CIFAR10' : {'mean': (0.49139967861519607, 0.48215840839460783, 0.44653091444546567),
@@ -42,15 +43,63 @@ def get_transform(dataset_name='CIFAR100', aug_type='none'):
         )
 
 class dataset(Dataset):
-    def __init__(self, dataset_name, train=True):
+    def __init__(self, args, task, transform, train=True):
+        self.root = os.path.join(args.root, args.dataset)
+        self.transform = transform
 
         if train:
-            pass
+            labeled_image_file = self.root + '/Train/Labeled/' + args.dataset + '_Images_Task' + str(task) + args.mode + '.npy'
+            labeled_file = self.root + '/Train/Labeled/' + args.dataset + '_Labels_Task' + str(task) + args.mode + '.npy'
+
+            unlabeled_image_file = self.root + '/Train/Unlabeled/' + args.dataset + '_Images_Task' + str(task) + args.mode + '.npy'
+            unlabeled_file = self.root + '/Train/Unlabeled/' + args.dataset + '_Labels_Task' + str(task) + args.mode + '.npy'
+
+            train_xl = np.squeeze(np.load(labeled_image_file))
+            train_yl = np.squeeze(np.load(labeled_file))
+            print('=================================================')
+            print(train_xl.shape)
+            print('=================================================')
+
+            num_labeled_class = np.shape(train_yl)[0]
+            train_xl = train_xl.reshape((num_labeled_class, 3, 32, 32))
+            train_xl = train_xl.transpose((0, 2, 3, 1))
+
+            self.train_xl = train_xl
+            self.train_yl = train_yl
+
+            train_xul = np.squeeze(np.load(unlabeled_image_file))
+            train_yul = np.squeeze(np.load(unlabeled_file))
+            num_unlabeled_class = np.shape(train_yul)[0]
+            train_xul = train_xul.reshape((num_unlabeled_class, 3, 32, 32))
+            train_xul = train_xul.transpose((0, 2, 3, 1))
+
+            self.train_xul = train_xul
+            self.train_yul = train_yul
+
         else:
-            pass
+            test_image_file = self.root + '/Test/' + args.dataset + '_Images_Task' + str(task) + args.mode + '.npy'
+            test_label_file = self.root + '/Test/' + args.dataset + '_Labels_Task' + str(task) + args.mode + '.npy'
+
 
 class dataloader():
-    def __init__(self, dataset_name):
-        self.dataset_name = dataset_name
+    def __init__(self, args):
+        self.args = args
+        self.dataset_name = args.dataset
         self.transforms = get_transform(self.dataset_name)
         self.transforms_test = get_transform(self.dataset_name)
+
+    def load(self, task, train=True):
+        if train:
+            labeled_dataset = dataset(self.args, task, self.transforms, train)
+            unlabeled_dataset = dataset(self.args, train)
+
+            labeled_trainloader = DataLoader(labeled_dataset, batch_size=self.args.batch_size, shuffle=True, num_workers=self.args.num_workers, drop_last=True)
+            unlabeled_trainloader = DataLoader(unlabeled_dataset, batch_size=self.args.batch_size, shuffle=True, num_workers=self.args.num_workers, drop_last=True)
+
+            return labeled_trainloader, unlabeled_trainloader
+
+        else:
+            test_dataset = dataset(self.args, train)
+            test_loader = DataLoader(test_dataset, batch_size=self.args.batch_size, shuffle=False, num_workers=self.args.num_workers)
+
+            return test_loader

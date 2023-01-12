@@ -83,8 +83,8 @@ class CIFAR100(datasets.CIFAR100):
                     if not os.path.exists(save_path): os.mkdir(save_path)
 
                 t = str(t) + '_'
-                np.save(os.path.join(save_path, args.dataset + 'Images_Task' + t + self.mode), np.array(self.super_data))
-                np.save(os.path.join(save_path, args.dataset + 'Labels_Task' + t + self.mode), np.array(self.super_target))
+                np.save(os.path.join(save_path, args.dataset + '_Images_Task' + t + self.mode), np.array(self.super_data))
+                np.save(os.path.join(save_path, args.dataset + '_Labels_Task' + t + self.mode), np.array(self.super_target))
 
 
     def __getitem__(self, idx):
