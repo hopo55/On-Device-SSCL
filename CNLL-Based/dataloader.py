@@ -48,37 +48,33 @@ class dataset(Dataset):
         self.transform = transform
 
         if train:
-            labeled_image_file = self.root + '/Train/Labeled/' + args.dataset + '_Images_Task' + str(task) + args.mode + '.npy'
-            labeled_file = self.root + '/Train/Labeled/' + args.dataset + '_Labels_Task' + str(task) + args.mode + '.npy'
+            labeled_image_file = self.root + '/Train/Labeled/' + args.dataset + '_Images_Task' + str(task) + '_' + args.mode + '.npy'
+            labeled_file = self.root + '/Train/Labeled/' + args.dataset + '_Labels_Task' + str(task) + '_' + args.mode + '.npy'
 
-            unlabeled_image_file = self.root + '/Train/Unlabeled/' + args.dataset + '_Images_Task' + str(task) + args.mode + '.npy'
-            unlabeled_file = self.root + '/Train/Unlabeled/' + args.dataset + '_Labels_Task' + str(task) + args.mode + '.npy'
+            unlabeled_image_file = self.root + '/Train/Unlabeled/' + args.dataset + '_Images_Task' + str(task) + '_' + args.mode + '.npy'
+            unlabeled_file = self.root + '/Train/Unlabeled/' + args.dataset + '_Labels_Task' + str(task) + '_' + args.mode + '.npy'
 
             train_xl = np.squeeze(np.load(labeled_image_file))
             train_yl = np.squeeze(np.load(labeled_file))
-            print('=================================================')
-            print(train_xl.shape)
-            print('=================================================')
-
-            num_labeled_class = np.shape(train_yl)[0]
-            train_xl = train_xl.reshape((num_labeled_class, 3, 32, 32))
-            train_xl = train_xl.transpose((0, 2, 3, 1))
 
             self.train_xl = train_xl
             self.train_yl = train_yl
+            print(self.train_yl)
 
             train_xul = np.squeeze(np.load(unlabeled_image_file))
             train_yul = np.squeeze(np.load(unlabeled_file))
-            num_unlabeled_class = np.shape(train_yul)[0]
-            train_xul = train_xul.reshape((num_unlabeled_class, 3, 32, 32))
-            train_xul = train_xul.transpose((0, 2, 3, 1))
 
             self.train_xul = train_xul
             self.train_yul = train_yul
 
         else:
-            test_image_file = self.root + '/Test/' + args.dataset + '_Images_Task' + str(task) + args.mode + '.npy'
-            test_label_file = self.root + '/Test/' + args.dataset + '_Labels_Task' + str(task) + args.mode + '.npy'
+            test_image_file = self.root + '/Test/' + args.dataset + '_Images_Task' + str(task) + '_' + args.mode + '.npy'
+            test_label_file = self.root + '/Test/' + args.dataset + '_Labels_Task' + str(task) + '_' + args.mode + '.npy'
+            test_x = np.squeeze(np.load(test_image_file))
+            test_y = np.squeeze(np.load(test_label_file))
+
+            self.test_x = test_x
+            self.test_y = test_y
 
 
 class dataloader():
@@ -99,7 +95,7 @@ class dataloader():
             return labeled_trainloader, unlabeled_trainloader
 
         else:
-            test_dataset = dataset(self.args, train)
+            test_dataset = dataset(self.args, task, self.transforms_test, train)
             test_loader = DataLoader(test_dataset, batch_size=self.args.batch_size, shuffle=False, num_workers=self.args.num_workers)
 
             return test_loader
