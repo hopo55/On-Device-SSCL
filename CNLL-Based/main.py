@@ -11,6 +11,7 @@ from models import resnet
 from losses import SupConLoss
 import data_generator
 import dataloader
+from metric import AverageMeter
 
 parser = argparse.ArgumentParser()
 # General Settings
@@ -22,16 +23,25 @@ parser.add_argument('--dataset', default='CIFAR100')
 parser.add_argument('--mode', type=str, default='super')
 parser.add_argument('--image_size', type=int, default=32)
 parser.add_argument('--label_ratio', type=float, default=0.2, help="Labeled data ratio")
-# Model Settings
-parser.add_argument('--num_class', type=int, default=100)
-parser.add_argument('--lr', '--learning_rate', type=float, default=0.0005) ### Learning Rate Should not be more than 0.001
-parser.add_argument('--buffer_size', type=int, default=0, help="size of buffer for replay")
-
-# Not yet used
 parser.add_argument('--batch_size', type=int, default=64)
 parser.add_argument('--num_workers', type=int, default=4)
+# Model Settings
+parser.add_argument('--epoch', type=int, default=10)
+parser.add_argument('--num_class', type=int, default=100)
+parser.add_argument('--lr', '--learning_rate', type=float, default=0.0005) ### Learning Rate Should not be more than 0.001
+
+# Not yet used
+parser.add_argument('--buffer_size', type=int, default=0, help="size of buffer for replay")
 
 args = parser.parse_args()
+
+def train(model, optimizer, labeled_trainloader, unlabeled_trainloader):
+    model.train()
+
+    acc = AverageMeter()
+    loss = AverageMeter()
+    loss_ul = AverageMeter()
+
 
 def main():
     ## GPU Setup
@@ -64,8 +74,11 @@ def main():
 
     for t, task_mode in enumerate(task_mode_list):
         data_loader = dataloader.dataloader(args)
-        train_loader = data_loader.load(t)
+        labeled_trainloader, unlabeled_trainloader = data_loader.load(t)
         test_loader = data_loader.load(t, train=False)
+
+        for epoch in range(args.epoch):
+            train(model, optimizer, labeled_trainloader, unlabeled_trainloader)
 
 
 if __name__ == '__main__':

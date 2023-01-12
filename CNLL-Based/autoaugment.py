@@ -1,304 +1,180 @@
-from PIL import Image, ImageEnhance, ImageOps
-import numpy as np
 import random
+import numpy as np
+from PIL import Image, ImageEnhance, ImageOps
 
-
-class ImageNetPolicy(object):
-    """Randomly choose one of the best 24 Sub-policies on ImageNet.
-
-    Example:
-    >>> policy = ImageNetPolicy()
-    >>> transformed = policy(image)
-
-    Example as a PyTorch Transform:
-    >>> transform=transforms.Compose([
-    >>>     transforms.Resize(256),
-    >>>     ImageNetPolicy(),
-    >>>     transforms.ToTensor()])
+"""
+Code adapted from
+https://github.com/4uiiurz1/pytorch-auto-augment/blob/master/auto_augment.py
+"""
+class RandomAugment:
     """
-
-    def __init__(self, fillcolor=(128, 128, 128)):
-        self.policies = [
-            SubPolicy(0.4, "posterize", 8, 0.6, "rotate", 9, fillcolor),
-            SubPolicy(0.6, "solarize", 5, 0.6, "autocontrast", 5, fillcolor),
-            SubPolicy(0.8, "equalize", 8, 0.6, "equalize", 3, fillcolor),
-            SubPolicy(0.6, "posterize", 7, 0.6, "posterize", 6, fillcolor),
-            SubPolicy(0.4, "equalize", 7, 0.2, "solarize", 4, fillcolor),
-            SubPolicy(0.4, "equalize", 4, 0.8, "rotate", 8, fillcolor),
-            SubPolicy(0.6, "solarize", 3, 0.6, "equalize", 7, fillcolor),
-            SubPolicy(0.8, "posterize", 5, 1.0, "equalize", 2, fillcolor),
-            SubPolicy(0.2, "rotate", 3, 0.6, "solarize", 8, fillcolor),
-            SubPolicy(0.6, "equalize", 8, 0.4, "posterize", 6, fillcolor),
-            SubPolicy(0.8, "rotate", 8, 0.4, "color", 0, fillcolor),
-            SubPolicy(0.4, "rotate", 9, 0.6, "equalize", 2, fillcolor),
-            SubPolicy(0.0, "equalize", 7, 0.8, "equalize", 8, fillcolor),
-            SubPolicy(0.6, "invert", 4, 1.0, "equalize", 8, fillcolor),
-            SubPolicy(0.6, "color", 4, 1.0, "contrast", 8, fillcolor),
-            SubPolicy(0.8, "rotate", 8, 1.0, "color", 2, fillcolor),
-            SubPolicy(0.8, "color", 8, 0.8, "solarize", 7, fillcolor),
-            SubPolicy(0.4, "sharpness", 7, 0.6, "invert", 8, fillcolor),
-            SubPolicy(0.6, "shearX", 5, 1.0, "equalize", 9, fillcolor),
-            SubPolicy(0.4, "color", 0, 0.6, "equalize", 3, fillcolor),
-            SubPolicy(0.4, "equalize", 7, 0.2, "solarize", 4, fillcolor),
-            SubPolicy(0.6, "solarize", 5, 0.6, "autocontrast", 5, fillcolor),
-            SubPolicy(0.6, "invert", 4, 1.0, "equalize", 8, fillcolor),
-            SubPolicy(0.6, "color", 4, 1.0, "contrast", 8, fillcolor),
-            SubPolicy(0.8, "equalize", 8, 0.6, "equalize", 3, fillcolor),
-        ]
-
-    def __call__(self, img):
-        policy_idx = random.randint(0, len(self.policies) - 1)
-        return self.policies[policy_idx](img)
-
-    def __repr__(self):
-        return "AutoAugment ImageNet Policy"
-
-
-class CIFAR10Policy(object):
-    """Randomly choose one of the best 25 Sub-policies on CIFAR10.
-
-    Example:
-    >>> policy = CIFAR10Policy()
-    >>> transformed = policy(image)
-
-    Example as a PyTorch Transform:
-    >>> transform=transforms.Compose([
-    >>>     transforms.Resize(256),
-    >>>     CIFAR10Policy(),
-    >>>     transforms.ToTensor()])
+    Random aggressive data augmentation transformer.
     """
-
-    def __init__(self, fillcolor=(128, 128, 128)):
-        self.policies = [
-            SubPolicy(0.1, "invert", 7, 0.2, "contrast", 6, fillcolor),
-            SubPolicy(0.7, "rotate", 2, 0.3, "translateX", 9, fillcolor),
-            SubPolicy(0.8, "sharpness", 1, 0.9, "sharpness", 3, fillcolor),
-            SubPolicy(0.5, "shearY", 8, 0.7, "translateY", 9, fillcolor),
-            SubPolicy(0.5, "autocontrast", 8, 0.9, "equalize", 2, fillcolor),
-            SubPolicy(0.2, "shearY", 7, 0.3, "posterize", 7, fillcolor),
-            SubPolicy(0.4, "color", 3, 0.6, "brightness", 7, fillcolor),
-            SubPolicy(0.3, "sharpness", 9, 0.7, "brightness", 9, fillcolor),
-            SubPolicy(0.6, "equalize", 5, 0.5, "equalize", 1, fillcolor),
-            SubPolicy(0.6, "contrast", 7, 0.6, "sharpness", 5, fillcolor),
-            SubPolicy(0.7, "color", 7, 0.5, "translateX", 8, fillcolor),
-            SubPolicy(0.3, "equalize", 7, 0.4, "autocontrast", 8, fillcolor),
-            SubPolicy(0.4, "translateY", 3, 0.2, "sharpness", 6, fillcolor),
-            SubPolicy(0.9, "brightness", 6, 0.2, "color", 8, fillcolor),
-            SubPolicy(0.5, "solarize", 2, 0.0, "invert", 3, fillcolor),
-            SubPolicy(0.2, "equalize", 0, 0.6, "autocontrast", 0, fillcolor),
-            SubPolicy(0.2, "equalize", 8, 0.6, "equalize", 4, fillcolor),
-            SubPolicy(0.9, "color", 9, 0.6, "equalize", 6, fillcolor),
-            SubPolicy(0.8, "autocontrast", 4, 0.2, "solarize", 8, fillcolor),
-            SubPolicy(0.1, "brightness", 3, 0.7, "color", 0, fillcolor),
-            SubPolicy(0.4, "solarize", 5, 0.9, "autocontrast", 3, fillcolor),
-            SubPolicy(0.9, "translateY", 9, 0.7, "translateY", 9, fillcolor),
-            SubPolicy(0.9, "autocontrast", 2, 0.8, "solarize", 3, fillcolor),
-            SubPolicy(0.8, "equalize", 8, 0.1, "invert", 3, fillcolor),
-            SubPolicy(0.7, "translateY", 9, 0.9, "autocontrast", 1, fillcolor),
-        ]
-
-    def __call__(self, img):
-        policy_idx = random.randint(0, len(self.policies) - 1)
-        return self.policies[policy_idx](img)
-
-    def __repr__(self):
-        return "AutoAugment CIFAR10 Policy"
-
-
-class CIFAR100Policy(object):
-    """Randomly choose one of the best 25 Sub-policies on CIFAR100.
-
-    Example:
-    >>> policy = CIFAR100Policy()
-    >>> transformed = policy(image)
-
-    Example as a PyTorch Transform:
-    >>> transform=transforms.Compose([
-    >>>     transforms.Resize(256),
-    >>>     CIFAR100Policy(),
-    >>>     transforms.ToTensor()])
-    """
-
-    def __init__(self, fillcolor=(128, 128, 128)):
-        self.policies = [
-            SubPolicy(0.1, "invert", 7, 0.2, "contrast", 6, fillcolor),
-            SubPolicy(0.7, "rotate", 2, 0.3, "translateX", 9, fillcolor),
-            SubPolicy(0.8, "sharpness", 1, 0.9, "sharpness", 3, fillcolor),
-            SubPolicy(0.5, "shearY", 8, 0.7, "translateY", 9, fillcolor),
-            SubPolicy(0.5, "autocontrast", 8, 0.9, "equalize", 2, fillcolor),
-            SubPolicy(0.2, "shearY", 7, 0.3, "posterize", 7, fillcolor),
-            SubPolicy(0.4, "color", 3, 0.6, "brightness", 7, fillcolor),
-            SubPolicy(0.3, "sharpness", 9, 0.7, "brightness", 9, fillcolor),
-            SubPolicy(0.6, "equalize", 5, 0.5, "equalize", 1, fillcolor),
-            SubPolicy(0.6, "contrast", 7, 0.6, "sharpness", 5, fillcolor),
-            SubPolicy(0.7, "color", 7, 0.5, "translateX", 8, fillcolor),
-            SubPolicy(0.3, "equalize", 7, 0.4, "autocontrast", 8, fillcolor),
-            SubPolicy(0.4, "translateY", 3, 0.2, "sharpness", 6, fillcolor),
-            SubPolicy(0.9, "brightness", 6, 0.2, "color", 8, fillcolor),
-            SubPolicy(0.5, "solarize", 2, 0.0, "invert", 3, fillcolor),
-            SubPolicy(0.2, "equalize", 0, 0.6, "autocontrast", 0, fillcolor),
-            SubPolicy(0.2, "equalize", 8, 0.6, "equalize", 4, fillcolor),
-            SubPolicy(0.9, "color", 9, 0.6, "equalize", 6, fillcolor),
-            SubPolicy(0.8, "autocontrast", 4, 0.2, "solarize", 8, fillcolor),
-            SubPolicy(0.1, "brightness", 3, 0.7, "color", 0, fillcolor),
-            SubPolicy(0.4, "solarize", 5, 0.9, "autocontrast", 3, fillcolor),
-            SubPolicy(0.9, "translateY", 9, 0.7, "translateY", 9, fillcolor),
-            SubPolicy(0.9, "autocontrast", 2, 0.8, "solarize", 3, fillcolor),
-            SubPolicy(0.8, "equalize", 8, 0.1, "invert", 3, fillcolor),
-            SubPolicy(0.7, "translateY", 9, 0.9, "autocontrast", 1, fillcolor),
-        ]
-
-    def __call__(self, img):
-        policy_idx = random.randint(0, len(self.policies) - 1)
-        return self.policies[policy_idx](img)
-
-    def __repr__(self):
-        return "AutoAugment CIFAR100 Policy"
-
-
-class SVHNPolicy(object):
-    """Randomly choose one of the best 25 Sub-policies on SVHN.
-
-    Example:
-    >>> policy = SVHNPolicy()
-    >>> transformed = policy(image)
-
-    Example as a PyTorch Transform:
-    >>> transform=transforms.Compose([
-    >>>     transforms.Resize(256),
-    >>>     SVHNPolicy(),
-    >>>     transforms.ToTensor()])
-    """
-
-    def __init__(self, fillcolor=(128, 128, 128)):
-        self.policies = [
-            SubPolicy(0.9, "shearX", 4, 0.2, "invert", 3, fillcolor),
-            SubPolicy(0.9, "shearY", 8, 0.7, "invert", 5, fillcolor),
-            SubPolicy(0.6, "equalize", 5, 0.6, "solarize", 6, fillcolor),
-            SubPolicy(0.9, "invert", 3, 0.6, "equalize", 3, fillcolor),
-            SubPolicy(0.6, "equalize", 1, 0.9, "rotate", 3, fillcolor),
-            SubPolicy(0.9, "shearX", 4, 0.8, "autocontrast", 3, fillcolor),
-            SubPolicy(0.9, "shearY", 8, 0.4, "invert", 5, fillcolor),
-            SubPolicy(0.9, "shearY", 5, 0.2, "solarize", 6, fillcolor),
-            SubPolicy(0.9, "invert", 6, 0.8, "autocontrast", 1, fillcolor),
-            SubPolicy(0.6, "equalize", 3, 0.9, "rotate", 3, fillcolor),
-            SubPolicy(0.9, "shearX", 4, 0.3, "solarize", 3, fillcolor),
-            SubPolicy(0.8, "shearY", 8, 0.7, "invert", 4, fillcolor),
-            SubPolicy(0.9, "equalize", 5, 0.6, "translateY", 6, fillcolor),
-            SubPolicy(0.9, "invert", 4, 0.6, "equalize", 7, fillcolor),
-            SubPolicy(0.3, "contrast", 3, 0.8, "rotate", 4, fillcolor),
-            SubPolicy(0.8, "invert", 5, 0.0, "translateY", 2, fillcolor),
-            SubPolicy(0.7, "shearY", 6, 0.4, "solarize", 8, fillcolor),
-            SubPolicy(0.6, "invert", 4, 0.8, "rotate", 4, fillcolor),
-            SubPolicy(0.3, "shearY", 7, 0.9, "translateX", 3, fillcolor),
-            SubPolicy(0.1, "shearX", 6, 0.6, "invert", 5, fillcolor),
-            SubPolicy(0.7, "solarize", 2, 0.6, "translateY", 7, fillcolor),
-            SubPolicy(0.8, "shearY", 4, 0.8, "invert", 8, fillcolor),
-            SubPolicy(0.7, "shearX", 9, 0.8, "translateY", 3, fillcolor),
-            SubPolicy(0.8, "shearY", 5, 0.7, "autocontrast", 3, fillcolor),
-            SubPolicy(0.7, "shearX", 2, 0.1, "invert", 5, fillcolor),
-        ]
-
-    def __call__(self, img):
-        policy_idx = random.randint(0, len(self.policies) - 1)
-        return self.policies[policy_idx](img)
-
-    def __repr__(self):
-        return "AutoAugment SVHN Policy"
-
-
-class SubPolicy(object):
-    def __init__(
-        self,
-        p1,
-        operation1,
-        magnitude_idx1,
-        p2,
-        operation2,
-        magnitude_idx2,
-        fillcolor=(128, 128, 128),
-    ):
-        ranges = {
-            "shearX": np.linspace(0, 0.3, 10),
-            "shearY": np.linspace(0, 0.3, 10),
-            "translateX": np.linspace(0, 150 / 331, 10),
-            "translateY": np.linspace(0, 150 / 331, 10),
-            "rotate": np.linspace(0, 30, 10),
-            "color": np.linspace(0.0, 0.9, 10),
-            "posterize": np.round(np.linspace(8, 4, 10), 0).astype(np.int),
-            "solarize": np.linspace(256, 0, 10),
-            "contrast": np.linspace(0.0, 0.9, 10),
-            "sharpness": np.linspace(0.0, 0.9, 10),
-            "brightness": np.linspace(0.0, 0.9, 10),
-            "autocontrast": [0] * 10,
-            "equalize": [0] * 10,
-            "invert": [0] * 10,
+    def __init__(self, N=2, M=9):
+        """
+        :param N: int, [1, #ops]. max number of operations
+        :param M: int, [0, 9]. max magnitude of operations
+        """
+        self.operations = {
+            'Identity': lambda img, magnitude: self.identity(img, magnitude),
+            'ShearX': lambda img, magnitude: self.shear_x(img, magnitude),
+            'ShearY': lambda img, magnitude: self.shear_y(img, magnitude),
+            'TranslateX': lambda img, magnitude: self.translate_x(img, magnitude),
+            'TranslateY': lambda img, magnitude: self.translate_y(img, magnitude),
+            'Rotate': lambda img, magnitude: self.rotate(img, magnitude),
+            'Mirror': lambda img, magnitude: self.mirror(img, magnitude),
+            'AutoContrast': lambda img, magnitude: self.auto_contrast(img, magnitude),
+            'Equalize': lambda img, magnitude: self.equalize(img, magnitude),
+            'Solarize': lambda img, magnitude: self.solarize(img, magnitude),
+            'Posterize': lambda img, magnitude: self.posterize(img, magnitude),
+            'Invert': lambda img, magnitude: self.invert(img, magnitude),
+            'Contrast': lambda img, magnitude: self.contrast(img, magnitude),
+            'Color': lambda img, magnitude: self.color(img, magnitude),
+            'Brightness': lambda img, magnitude: self.brightness(img, magnitude),
+            'Sharpness': lambda img, magnitude: self.sharpness(img, magnitude)
         }
 
-        # from https://stackoverflow.com/questions/5252170/specify-image-filling-color-when-rotating-in-python-with-pil-and-setting-expand
-        def rotate_with_fill(img, magnitude):
-            rot = img.convert("RGBA").rotate(magnitude)
-            return Image.composite(
-                rot, Image.new("RGBA", rot.size, (128,) * 4), rot
-            ).convert(img.mode)
+        self.N = np.clip(N, a_min=1, a_max=len(self.operations))
+        self.M = np.clip(M, a_min=0, a_max=9)
 
-        func = {
-            "shearX": lambda img, magnitude: img.transform(
-                img.size,
-                Image.AFFINE,
-                (1, magnitude * random.choice([-1, 1]), 0, 0, 1, 0),
-                Image.BICUBIC,
-                fillcolor=fillcolor,
-            ),
-            "shearY": lambda img, magnitude: img.transform(
-                img.size,
-                Image.AFFINE,
-                (1, 0, 0, magnitude * random.choice([-1, 1]), 1, 0),
-                Image.BICUBIC,
-                fillcolor=fillcolor,
-            ),
-            "translateX": lambda img, magnitude: img.transform(
-                img.size,
-                Image.AFFINE,
-                (1, 0, magnitude * img.size[0] * random.choice([-1, 1]), 0, 1, 0),
-                fillcolor=fillcolor,
-            ),
-            "translateY": lambda img, magnitude: img.transform(
-                img.size,
-                Image.AFFINE,
-                (1, 0, 0, 0, 1, magnitude * img.size[1] * random.choice([-1, 1])),
-                fillcolor=fillcolor,
-            ),
-            "rotate": lambda img, magnitude: rotate_with_fill(img, magnitude),
-            "color": lambda img, magnitude: ImageEnhance.Color(img).enhance(
-                1 + magnitude * random.choice([-1, 1])
-            ),
-            "posterize": lambda img, magnitude: ImageOps.posterize(img, magnitude),
-            "solarize": lambda img, magnitude: ImageOps.solarize(img, magnitude),
-            "contrast": lambda img, magnitude: ImageEnhance.Contrast(img).enhance(
-                1 + magnitude * random.choice([-1, 1])
-            ),
-            "sharpness": lambda img, magnitude: ImageEnhance.Sharpness(img).enhance(
-                1 + magnitude * random.choice([-1, 1])
-            ),
-            "brightness": lambda img, magnitude: ImageEnhance.Brightness(img).enhance(
-                1 + magnitude * random.choice([-1, 1])
-            ),
-            "autocontrast": lambda img, magnitude: ImageOps.autocontrast(img),
-            "equalize": lambda img, magnitude: ImageOps.equalize(img),
-            "invert": lambda img, magnitude: ImageOps.invert(img),
-        }
-
-        self.p1 = p1
-        self.operation1 = func[operation1]
-        self.magnitude1 = ranges[operation1][magnitude_idx1]
-        self.p2 = p2
-        self.operation2 = func[operation2]
-        self.magnitude2 = ranges[operation2][magnitude_idx2]
-
-    def __call__(self, img):
-        if random.random() < self.p1:
-            img = self.operation1(img, self.magnitude1)
-        if random.random() < self.p2:
-            img = self.operation2(img, self.magnitude2)
+    def identity(self, img, magnitude):
         return img
+
+    def transform_matrix_offset_center(self, matrix, x, y):
+        o_x = float(x) / 2 + 0.5
+        o_y = float(y) / 2 + 0.5
+        offset_matrix = np.array([[1, 0, o_x], [0, 1, o_y], [0, 0, 1]])
+        reset_matrix = np.array([[1, 0, -o_x], [0, 1, -o_y], [0, 0, 1]])
+        transform_matrix = offset_matrix @ matrix @ reset_matrix
+        return transform_matrix
+
+    def shear_x(self, img, magnitude):
+        img = img.transpose(Image.TRANSPOSE)
+        magnitudes = np.random.choice([-1.0, 1.0]) * np.linspace(0, 0.3, 11)
+        transform_matrix = np.array([[1, random.uniform(magnitudes[magnitude], magnitudes[magnitude+1]), 0],
+                                     [0, 1, 0],
+                                     [0, 0, 1]])
+        transform_matrix = self.transform_matrix_offset_center(transform_matrix, img.size[0], img.size[1])
+        img = img.transform(img.size, Image.AFFINE, transform_matrix.flatten()[:6], Image.BICUBIC)
+        img = img.transpose(Image.TRANSPOSE)
+        return img
+
+    def shear_y(self, img, magnitude):
+        img = img.transpose(Image.TRANSPOSE)
+        magnitudes = np.random.choice([-1.0, 1.0]) * np.linspace(0, 0.3, 11)
+        transform_matrix = np.array([[1, 0, 0],
+                                     [random.uniform(magnitudes[magnitude], magnitudes[magnitude+1]), 1, 0],
+                                     [0, 0, 1]])
+        transform_matrix = self.transform_matrix_offset_center(transform_matrix, img.size[0], img.size[1])
+        img = img.transform(img.size, Image.AFFINE, transform_matrix.flatten()[:6], Image.BICUBIC)
+        img = img.transpose(Image.TRANSPOSE)
+        return img
+
+    def translate_x(self, img, magnitude):
+        img = img.transpose(Image.TRANSPOSE)
+        magnitudes = np.random.choice([-1.0, 1.0]) * np.linspace(0, 0.3, 11)
+        transform_matrix = np.array([[1, 0, 0],
+                                     [0, 1, img.size[1]*random.uniform(magnitudes[magnitude], magnitudes[magnitude+1])],
+                                     [0, 0, 1]])
+        transform_matrix = self.transform_matrix_offset_center(transform_matrix, img.size[0], img.size[1])
+        img = img.transform(img.size, Image.AFFINE, transform_matrix.flatten()[:6], Image.BICUBIC)
+        img = img.transpose(Image.TRANSPOSE)
+        return img
+
+    def translate_y(self, img, magnitude):
+        img = img.transpose(Image.TRANSPOSE)
+        magnitudes = np.random.choice([-1.0, 1.0]) * np.linspace(0, 0.3, 11)
+        transform_matrix = np.array([[1, 0, img.size[0]*random.uniform(magnitudes[magnitude], magnitudes[magnitude+1])],
+                                     [0, 1, 0],
+                                     [0, 0, 1]])
+        transform_matrix = self.transform_matrix_offset_center(transform_matrix, img.size[0], img.size[1])
+        img = img.transform(img.size, Image.AFFINE, transform_matrix.flatten()[:6], Image.BICUBIC)
+        img = img.transpose(Image.TRANSPOSE)
+        return img
+
+    def rotate(self, img, magnitude):
+        img = img.transpose(Image.TRANSPOSE)
+        magnitudes = np.random.choice([-1.0, 1.0]) * np.linspace(0, 30, 11)
+        theta = np.deg2rad(random.uniform(magnitudes[magnitude], magnitudes[magnitude+1]))
+        transform_matrix = np.array([[np.cos(theta), -np.sin(theta), 0],
+                                     [np.sin(theta), np.cos(theta), 0],
+                                     [0, 0, 1]])
+        transform_matrix = self.transform_matrix_offset_center(transform_matrix, img.size[0], img.size[1])
+        img = img.transform(img.size, Image.AFFINE, transform_matrix.flatten()[:6], Image.BICUBIC)
+        img = img.transpose(Image.TRANSPOSE)
+        return img
+
+    def mirror(self, img, magnitude):
+        img = ImageOps.mirror(img)
+        return img
+
+    def auto_contrast(self, img, magnitude):
+        img = ImageOps.autocontrast(img)
+        return img
+
+    def equalize(self, img, magnitude):
+        img = ImageOps.equalize(img)
+        return img
+
+    def solarize(self, img, magnitude):
+        magnitudes = np.linspace(0, 256, 11)
+        img = ImageOps.solarize(img, random.uniform(magnitudes[magnitude], magnitudes[magnitude+1]))
+        return img
+
+    def posterize(self, img, magnitude):
+        magnitudes = np.linspace(4, 8, 11)
+        img = ImageOps.posterize(img, int(round(random.uniform(magnitudes[magnitude], magnitudes[magnitude+1]))))
+        return img
+
+    def invert(self, img, magnitude):
+        img = ImageOps.invert(img)
+        return img
+
+    def contrast(self, img, magnitude):
+        magnitudes = 1.0 + np.random.choice([-1.0, 1.0])*np.linspace(0.1, 0.9, 11)
+        img = ImageEnhance.Contrast(img).enhance(random.uniform(magnitudes[magnitude], magnitudes[magnitude+1]))
+        return img
+
+    def color(self, img, magnitude):
+        magnitudes = 1.0 + np.random.choice([-1.0, 1.0])*np.linspace(0.1, 0.9, 11)
+        img = ImageEnhance.Color(img).enhance(random.uniform(magnitudes[magnitude], magnitudes[magnitude+1]))
+        return img
+
+    def brightness(self, img, magnitude):
+        magnitudes = 1.0 + np.random.choice([-1.0, 1.0])*np.linspace(0.1, 0.9, 11)
+        img = ImageEnhance.Brightness(img).enhance(random.uniform(magnitudes[magnitude], magnitudes[magnitude+1]))
+        return img
+
+    def sharpness(self, img, magnitude):
+        magnitudes = 1.0 + np.random.choice([-1.0, 1.0])*np.linspace(0.1, 0.9, 11)
+        img = ImageEnhance.Sharpness(img).enhance(random.uniform(magnitudes[magnitude], magnitudes[magnitude+1]))
+        return img
+
+    def __call__(self, img):
+        ops = np.random.choice(list(self.operations.keys()), self.N)
+        for op in ops:
+            mag = random.randint(0, self.M)
+            img = self.operations[op](img, mag)
+
+        return img
+
+class Cutout:
+    def __init__(self, M=0.5, fill=0.0):
+        self.M = np.clip(M, a_min=0.0, a_max=1.0)
+        self.fill = fill
+
+    def __call__(self, x):
+        """
+        Ref https://github.com/uoguelph-mlrg/Cutout/blob/master/util/cutout.py
+        """
+        _, h, w = x.shape
+        lh, lw = int(round(self.M * h)), int(round(self.M * w))
+
+        cx, cy = np.random.randint(0, h), np.random.randint(0, w)
+        x1 = np.clip(cx - lh // 2, 0, h)
+        x2 = np.clip(cx + lh // 2, 0, h)
+        y1 = np.clip(cy - lw // 2, 0, w)
+        y2 = np.clip(cy + lw // 2, 0, w)
+        x[:, x1: x2, y1: y2] = self.fill
+
+        return x
