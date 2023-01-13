@@ -15,8 +15,8 @@ from metric import AverageMeter
 
 parser = argparse.ArgumentParser()
 # General Settings
-parser.add_argument('--gpuid', type=int, default=0)
 parser.add_argument('--seed', type=int, default=0)
+parser.add_argument('--device', type=int, default=0)
 # Dataset Settings
 parser.add_argument('--root', type=str, default='./data/')
 parser.add_argument('--dataset', default='CIFAR100')
@@ -35,7 +35,7 @@ parser.add_argument('--buffer_size', type=int, default=0, help="size of buffer f
 
 args = parser.parse_args()
 
-def train(model, optimizer, labeled_trainloader, unlabeled_trainloader):
+def train(model, labeled_trainloader, unlabeled_trainloader, criterion, optimizer):
     model.train()
 
     acc = AverageMeter()
@@ -45,13 +45,21 @@ def train(model, optimizer, labeled_trainloader, unlabeled_trainloader):
     unlabeled_train_iter = iter(unlabeled_trainloader)
 
     for batch_idx, (xl, y) in enumerate(labeled_trainloader):
-        xl, y = xl.cuda(), y.cuda()
-        x1_ul, x2_ul, yul = unlabeled_train_iter.next()
+        batch_size = xl.shape[0]
+        xl, y = xl.to(args.device), y.to(args.device)
+
+        x1_ul, x2_ul, _ = unlabeled_train_iter.next()
+        x1_ul, x2_ul = x1_ul.to(args.device), x2_ul.to(args.device)
+
+        with torch.no_grad():
+            l_logits = model(xl)
+            l_loss = criterion(l_logits, y.long())
+            print(l_loss)
 
 
 def main():
     ## GPU Setup
-    torch.cuda.set_device(args.gpuid)
+    torch.cuda.set_device(args.device)
 
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -64,6 +72,7 @@ def main():
 
     # Create Model
     model = resnet.ResNet18(args.num_class)
+    model.to(args.device)
 
     # Semi-Supervised Loss
     criterion = nn.CrossEntropyLoss()
@@ -84,7 +93,7 @@ def main():
         test_loader = data_loader.load(t, train=False)
 
         for epoch in range(args.epoch):
-            train(model, optimizer, labeled_trainloader, unlabeled_trainloader)
+            train(model, labeled_trainloader, unlabeled_trainloader, criterion, optimizer)
 
 
 if __name__ == '__main__':

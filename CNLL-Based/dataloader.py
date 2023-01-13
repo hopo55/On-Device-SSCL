@@ -101,23 +101,17 @@ class dataset(Dataset):
     def __getitem__(self, index):
         if self.train:
             if self.lab:
-                # img, target = self.train_xl, self.train_yl
-                img, target = 255*self.train_xl[index], self.train_yl[index] # CNLL version
+                img, target = 255*self.train_xl[index], self.train_yl[index]
                 img = img.astype(np.uint8)
                 img = Image.fromarray(img)
                 img = self.transform["labeled"][0](img)
                 return img, target
             else:
-                img, target = 255*self.train_xl[index], self.train_yl[index] # CNLL version
+                img, target = 255*self.train_xul[index], self.train_yul[index] 
                 img = img.astype(np.uint8)
                 img = Image.fromarray(img)
                 img1 = self.transform["unlabeled"][0](img)
                 img2 = self.transform["unlabeled"][1](img)
-                if img1 != img2:
-                    print("augmented")
-                else:
-                    print("same data")
-
                 return img1, img2, target
         else:
             img, target = 255*self.test_x[index], self.test_y[index]
@@ -135,9 +129,10 @@ class dataloader():
         if train:
             labeled_dataset = dataset(self.args, task, train)
             unlabeled_dataset = dataset(self.args, task, lab=False)
+            mu = int(unlabeled_dataset.__len__() / labeled_dataset.__len__())
 
             labeled_trainloader = DataLoader(labeled_dataset, batch_size=self.args.batch_size, shuffle=True, num_workers=self.args.num_workers, drop_last=True)
-            unlabeled_trainloader = DataLoader(unlabeled_dataset, batch_size=self.args.batch_size, shuffle=True, num_workers=self.args.num_workers, drop_last=True)
+            unlabeled_trainloader = DataLoader(unlabeled_dataset, batch_size=self.args.batch_size*mu, shuffle=True, num_workers=self.args.num_workers, drop_last=True)
 
             return labeled_trainloader, unlabeled_trainloader
 
