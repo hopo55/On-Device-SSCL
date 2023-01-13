@@ -30,7 +30,7 @@ parser.add_argument('--batch_size', type=int, default=128)
 parser.add_argument('--test_size', type=int, default=64)
 parser.add_argument('--num_workers', type=int, default=0)
 # Model Settings
-parser.add_argument('--epoch', type=int, default=10)
+parser.add_argument('--epoch', type=int, default=100)
 parser.add_argument('--lr', '--learning_rate', type=float, default=0.1)
 parser.add_argument('--lambda_u', type=float, default=1.)
 parser.add_argument('--num_class', type=int, default=100)
@@ -42,8 +42,6 @@ args = parser.parse_args()
 
 def train(epoch, model, labeled_trainloader, unlabeled_trainloader, criterion, optimizer):
     model.train()
-    total = 0
-    correct = 0
 
     acc = AverageMeter()
     losses = AverageMeter()
@@ -87,17 +85,16 @@ def train(epoch, model, labeled_trainloader, unlabeled_trainloader, criterion, o
         losses_ul.update(ul_loss)
         losses_total.update(total_loss)
 
-        total += y.size(0)
-        correct += predicted.eq(y).cpu().sum().item()
-        acc = 100.*correct/total
+        correct = predicted.eq(y).cpu().sum().item()
+        acc.update(correct, y.size(0))
 
         sys.stdout.write('\r')
-        sys.stdout.write('%s-%s | Epoch [%3d/%3d] Iter[%3d/%3d]\t Labeled loss: %.2f  Unlabeled loss: %.2f Total Loss: %.4f  Accuracy: %.2f' % (args.dataset, args.mode, epoch+1, args.epoch, batch_idx+1, num_iter, l_loss, ul_loss, total_loss, acc))
+        sys.stdout.write('%s-%s | Epoch [%3d/%3d] Iter[%3d/%3d]\t Labeled loss: %.2f  Unlabeled loss: %.2f Total Loss: %.4f  Accuracy: %.2f' % (args.dataset, args.mode, epoch+1, args.epoch, batch_idx+1, num_iter, l_loss, ul_loss, total_loss, acc.avg))
         sys.stdout.flush()
 
-def test(epoch, model, test_loader):
-    correct = 0
-    total = 0
+def test(task, model, test_loader):
+    acc = AverageMeter()
+    sys.stdout.write('\n')
 
     model.eval()
     with torch.no_grad():
@@ -107,13 +104,14 @@ def test(epoch, model, test_loader):
             output = model(x)
             _, predicted = torch.max(output, dim=1)
 
-            total += y.size(0)
-            correct += predicted.eq(y).cpu().sum().item()
-            print(total)
-            print(correct)
+            correct = predicted.eq(y).cpu().sum().item()
+            acc.update(correct, y.size(0))
 
-        # acc = 100.*correct/total
-        # print("\n| Test Epoch #%d\t Accuracy (Whole Test Dataset): %.2f%%\n" %(epoch, acc))
+            sys.stdout.write('\r')
+            sys.stdout.write("Test | Accuracy (Test Dataset Up to Task-%d): %.2f%%" % (task, acc.avg))
+            sys.stdout.flush()
+
+    return acc
 
 def main():
     ## GPU Setup
@@ -166,9 +164,11 @@ def main():
 
         for epoch in range(args.epoch):
             train(epoch, model, labeled_trainloader, unlabeled_trainloader, criterion, optimizer)
-            test(epoch, model, test_loader)
-        
+        test(t, model, test_loader)
+
         scheduler.step()
+        
+        
 
 
 if __name__ == '__main__':
