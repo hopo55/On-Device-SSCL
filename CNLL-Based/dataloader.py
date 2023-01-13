@@ -83,13 +83,20 @@ class dataset(Dataset):
 
         else:
             # load test data & label
-            test_image_file = self.root + '/Test/' + args.dataset + '_Images_Task' + str(task) + '_' + args.mode + '.npy'
-            test_label_file = self.root + '/Test/' + args.dataset + '_Labels_Task' + str(task) + '_' + args.mode + '.npy'
+            self.test_x = []
+            self.test_y = []
 
-            test_x = np.squeeze(np.load(test_image_file))
-            test_y = np.squeeze(np.load(test_label_file))
-            self.test_x = test_x
-            self.test_y = test_y
+            for task_idx in range(task):
+                test_image_file = self.root + '/Test/' + args.dataset + '_Images_Task' + str(task_idx) + '_' + args.mode + '.npy'
+                test_label_file = self.root + '/Test/' + args.dataset + '_Labels_Task' + str(task_idx) + '_' + args.mode + '.npy'
+
+                test_x = np.squeeze(np.load(test_image_file))
+                test_y = np.squeeze(np.load(test_label_file))
+                self.test_x.extend(test_x)
+                self.test_y.extend(test_y)
+
+            self.test_x = np.array(self.test_x)
+            self.test_y = np.array(self.test_y)
 
     def __len__(self):
         if self.train:
@@ -110,9 +117,9 @@ class dataset(Dataset):
                 img, target = 255*self.train_xul[index], self.train_yul[index] 
                 img = img.astype(np.uint8)
                 img = Image.fromarray(img)
-                img1 = self.transform["unlabeled"][0](img)
-                img2 = self.transform["unlabeled"][1](img)
-                return img1, img2, target
+                weak = self.transform["unlabeled"][0](img)
+                strong = self.transform["unlabeled"][1](img)
+                return weak, strong, target
         else:
             img, target = 255*self.test_x[index], self.test_y[index]
             img = img.astype(np.uint8)
@@ -138,6 +145,6 @@ class dataloader():
 
         else:
             test_dataset = dataset(self.args, task, train)
-            test_loader = DataLoader(test_dataset, batch_size=self.args.batch_size, shuffle=False, num_workers=self.args.num_workers)
+            test_loader = DataLoader(test_dataset, batch_size=self.args.test_size, shuffle=False, num_workers=self.args.num_workers)
 
             return test_loader
