@@ -36,7 +36,7 @@ parser.add_argument('--lambda_u', type=float, default=1.)
 parser.add_argument('--num_class', type=int, default=100)
 
 # Not yet used
-parser.add_argument('--buffer_size', type=int, default=0, help="size of buffer for replay")
+parser.add_argument('--buffer_size', type=int, default=500, help="size of buffer for replay")
 
 args = parser.parse_args()
 
@@ -108,7 +108,7 @@ def test(task, model, test_loader):
             acc.update(correct, y.size(0))
 
             sys.stdout.write('\r')
-            sys.stdout.write("Test | Accuracy (Test Dataset Up to Task-%d): %.2f%%" % (task, acc.avg))
+            sys.stdout.write("Test | Accuracy (Test Dataset Up to Task-%d): %.2f%%" % (task+1, acc.avg))
             sys.stdout.flush()
 
     return acc

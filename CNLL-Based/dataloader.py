@@ -86,7 +86,7 @@ class dataset(Dataset):
             self.test_x = []
             self.test_y = []
 
-            for task_idx in range(task):
+            for task_idx in range(task+1):
                 test_image_file = self.root + '/Test/' + args.dataset + '_Images_Task' + str(task_idx) + '_' + args.mode + '.npy'
                 test_label_file = self.root + '/Test/' + args.dataset + '_Labels_Task' + str(task_idx) + '_' + args.mode + '.npy'
 
