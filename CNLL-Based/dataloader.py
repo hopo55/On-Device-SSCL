@@ -29,11 +29,10 @@ def get_transform(dataset_name='CIFAR100', aug_type='none'):
     elif aug_type == 'strong':
         transform_strong = transforms.Compose(
             [
-                transforms.RandomCrop(32, padding=4),
-                transforms.RandomHorizontalFlip(),
-                autoaugment.__dict__[dataset_name + 'Policy'](),
+                autoaugment.RandomAugment(),
                 transforms.ToTensor(),
                 transforms.Normalize(dataset_stats[dataset_name]['mean'], dataset_stats[dataset_name]['std']),
+                autoaugment.Cutout()
             ]
         )
         return transform_strong
@@ -103,10 +102,29 @@ class dataset(Dataset):
         if self.train:
             if self.lab:
                 # img, target = self.train_xl, self.train_yl
-                img, target = 255*self.train_xl, self.train_yl # CNLL version
+                img, target = 255*self.train_xl[index], self.train_yl[index] # CNLL version
                 img = img.astype(np.uint8)
                 img = Image.fromarray(img)
-                img = self.transforms["labeled"](img)
+                img = self.transform["labeled"][0](img)
+                return img, target
+            else:
+                img, target = 255*self.train_xl[index], self.train_yl[index] # CNLL version
+                img = img.astype(np.uint8)
+                img = Image.fromarray(img)
+                img1 = self.transform["unlabeled"][0](img)
+                img2 = self.transform["unlabeled"][1](img)
+                if img1 != img2:
+                    print("augmented")
+                else:
+                    print("same data")
+
+                return img1, img2, target
+        else:
+            img, target = 255*self.test_x[index], self.test_y[index]
+            img = img.astype(np.uint8)
+            img = Image.fromarray(img)
+            img = self.transform['test'][0](img)            
+            return img, target
 
 class dataloader():
     def __init__(self, args):
@@ -124,7 +142,7 @@ class dataloader():
             return labeled_trainloader, unlabeled_trainloader
 
         else:
-            test_dataset = dataset(self.args, task, self.transforms_test, train)
+            test_dataset = dataset(self.args, task, train)
             test_loader = DataLoader(test_dataset, batch_size=self.args.batch_size, shuffle=False, num_workers=self.args.num_workers)
 
             return test_loader

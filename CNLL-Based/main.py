@@ -24,7 +24,7 @@ parser.add_argument('--mode', type=str, default='super')
 parser.add_argument('--image_size', type=int, default=32)
 parser.add_argument('--label_ratio', type=float, default=0.2, help="Labeled data ratio")
 parser.add_argument('--batch_size', type=int, default=64)
-parser.add_argument('--num_workers', type=int, default=4)
+parser.add_argument('--num_workers', type=int, default=0)
 # Model Settings
 parser.add_argument('--epoch', type=int, default=10)
 parser.add_argument('--num_class', type=int, default=100)
@@ -41,6 +41,12 @@ def train(model, optimizer, labeled_trainloader, unlabeled_trainloader):
     acc = AverageMeter()
     loss = AverageMeter()
     loss_ul = AverageMeter()
+
+    unlabeled_train_iter = iter(unlabeled_trainloader)
+
+    for batch_idx, (xl, y) in enumerate(labeled_trainloader):
+        xl, y = xl.cuda(), y.cuda()
+        x1_ul, x2_ul, yul = unlabeled_train_iter.next()
 
 
 def main():
