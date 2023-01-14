@@ -14,7 +14,7 @@ from models import resnet
 from losses import SupConLoss
 import data_generator
 import dataloader
-from metric import AverageMeter
+from metric import AverageMeter, SSCL_logger
 
 parser = argparse.ArgumentParser()
 # General Settings
@@ -30,7 +30,7 @@ parser.add_argument('--batch_size', type=int, default=128)
 parser.add_argument('--test_size', type=int, default=64)
 parser.add_argument('--num_workers', type=int, default=0)
 # Model Settings
-parser.add_argument('--epoch', type=int, default=100)
+parser.add_argument('--epoch', type=int, default=10)
 parser.add_argument('--lr', '--learning_rate', type=float, default=0.1)
 parser.add_argument('--lambda_u', type=float, default=1.)
 parser.add_argument('--num_class', type=int, default=100)
@@ -92,6 +92,8 @@ def train(epoch, model, labeled_trainloader, unlabeled_trainloader, criterion, o
         sys.stdout.write('%s-%s | Epoch [%3d/%3d] Iter[%3d/%3d]\t Labeled loss: %.2f  Unlabeled loss: %.2f Total Loss: %.4f  Accuracy: %.2f' % (args.dataset, args.mode, epoch+1, args.epoch, batch_idx+1, num_iter, l_loss, ul_loss, total_loss, acc.avg))
         sys.stdout.flush()
 
+    return l_loss.item(), ul_loss.item(), total_loss.item(), acc.avg
+
 def test(task, model, test_loader):
     acc = AverageMeter()
     sys.stdout.write('\n')
@@ -111,7 +113,7 @@ def test(task, model, test_loader):
             sys.stdout.write("Test | Accuracy (Test Dataset Up to Task-%d): %.2f%%" % (task+1, acc.avg))
             sys.stdout.flush()
 
-    return acc
+    return acc.avg
 
 def main():
     ## GPU Setup
@@ -138,6 +140,9 @@ def main():
     optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, weight_decay=5e-4)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10, eta_min=2e-4)
 
+    # For plotting the logs
+    sscl_logger = SSCL_logger('logs/' + args.dataset + '/sscl_logs_cal_05_')
+
     if args.dataset == 'CIFAR10':
         task_mode_list = ['Task-1', 'Task-2', 'Task-3', 'Task-4', 'Task-5']
     elif args.dataset == 'CIFAR100':
@@ -161,14 +166,22 @@ def main():
         weight = weight.cuda()
         criterion = nn.CrossEntropyLoss(weight = weight)
 
-
+        best_acc = 0
         for epoch in range(args.epoch):
-            train(epoch, model, labeled_trainloader, unlabeled_trainloader, criterion, optimizer)
-        test(t, model, test_loader)
+            l_loss, ul_loss, total_loss, train_acc = train(epoch, model, labeled_trainloader, unlabeled_trainloader, criterion, optimizer)
+
+            if train_acc > best_acc:
+                best_acc = train_acc
+                sscl_logger.result('SSCL Train Epoch Loss/Labeled', l_loss, epoch)
+                sscl_logger.result('SSCL Train Epoch Loss/Unlabeled', ul_loss, epoch)
+                sscl_logger.result('SSCL Train Epoch Loss/Total', total_loss, epoch)
+
+        sscl_logger.result('SSCL Train Accuracy', best_acc, t)
+
+        test_acc = test(t, model, test_loader)
+        sscl_logger.result('SSCL Test Accuracy', test_acc, t)
 
         scheduler.step()
-        
-        
 
 
 if __name__ == '__main__':
