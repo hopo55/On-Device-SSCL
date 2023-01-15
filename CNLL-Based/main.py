@@ -20,14 +20,15 @@ parser = argparse.ArgumentParser()
 # General Settings
 parser.add_argument('--seed', type=int, default=0)
 parser.add_argument('--device', type=int, default=0)
+parser.add_argument('--device_name', type=str, default='jetson_4gb')
 # Dataset Settings
 parser.add_argument('--root', type=str, default='./data/')
 parser.add_argument('--dataset', default='CIFAR100')
 parser.add_argument('--mode', type=str, default='super')
 parser.add_argument('--image_size', type=int, default=32)
 parser.add_argument('--label_ratio', type=float, default=0.2, help="Labeled data ratio")
-parser.add_argument('--batch_size', type=int, default=128)
-parser.add_argument('--test_size', type=int, default=64)
+parser.add_argument('--batch_size', type=int, default=32)
+parser.add_argument('--test_size', type=int, default=16)
 parser.add_argument('--num_workers', type=int, default=0)
 # Model Settings
 parser.add_argument('--model_name', type=str, default='Reduced_ResNet18')
@@ -142,7 +143,7 @@ def main():
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10, eta_min=2e-4)
 
     # For plotting the logs
-    sscl_logger = SSCL_logger('logs/' + args.dataset + '/sscl_logs_cal_05_')
+    sscl_logger = SSCL_logger('logs/' + args.dataset + '/sscl_logs_' + args.device_name + '_')
 
     if args.dataset == 'CIFAR10':
         task_mode_list = ['Task-1', 'Task-2', 'Task-3', 'Task-4', 'Task-5']

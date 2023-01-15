@@ -75,6 +75,7 @@ class CIFAR100(datasets.CIFAR100):
                 
                 if train:
                     save_path = self.root + '/Train'
+                    if not os.path.exists(save_path): os.mkdir(save_path)
                     if lab: save_path = save_path + '/Labeled'
                     else: save_path = save_path + '/Unlabeled'
                     if not os.path.exists(save_path): os.mkdir(save_path)
