@@ -69,7 +69,7 @@ class Bottleneck(nn.Module):
         return out
 
 class ResNet(nn.Module):
-    def __init__(self, block, num_blocks, num_classes, nf, bias):
+    def __init__(self, block, num_blocks, num_classes, nf, bias, ncm=False):
         super(ResNet, self).__init__()
         self.in_planes = nf
         self.conv1 = conv3x3(3, nf * 1)
@@ -302,6 +302,8 @@ class NearestClassMean(nn.Module):
 '''
 See https://github.com/kuangliu/pytorch-cifar/blob/master/models/resnet.py
 '''
+def ResNet18_NCM(out_dim=10, nf=20, bias=True):
+    return ResNet(BasicBlock, [2, 2, 2, 2], out_dim, nf, bias, ncm=True)
 
 # Reduced ResNet18 as in GEM MIR(note that nf=20).
 def Reduced_ResNet18(out_dim=10, nf=20, bias=True):
