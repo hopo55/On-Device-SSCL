@@ -87,13 +87,13 @@ def train(epoch, model, labeled_trainloader, unlabeled_trainloader, criterion, o
         losses_total.update(total_loss)
 
         correct = predicted.eq(y).cpu().sum().item()
-        acc.update(correct)
+        acc.update(correct, len(y))
 
         sys.stdout.write('\r')
-        sys.stdout.write('%s-%s | Epoch [%3d/%3d] Iter[%3d/%3d]\t Labeled loss: %.2f  Unlabeled loss: %.2f Total Loss: %.4f  Accuracy: %.2f' % (args.dataset, args.mode, epoch+1, args.epoch, batch_idx+1, num_iter, l_loss, ul_loss, total_loss, acc.avg))
+        sys.stdout.write('%s-%s | Epoch [%3d/%3d] Iter[%3d/%3d]\t Labeled loss: %.2f  Unlabeled loss: %.2f Total Loss: %.4f  Accuracy: %.2f' % (args.dataset, args.mode, epoch+1, args.epoch, batch_idx+1, num_iter, l_loss, ul_loss, total_loss, acc.avg*100))
         sys.stdout.flush()
 
-    return l_loss.item(), ul_loss.item(), total_loss.item(), acc.avg
+    return l_loss.item(), ul_loss.item(), total_loss.item(), acc.avg*100
 
 def test(task, model, test_loader):
     acc = AverageMeter()
