@@ -1,5 +1,6 @@
 import os
 import sys
+import math
 import random
 import argparse
 import numpy as np
@@ -27,8 +28,8 @@ parser.add_argument('--dataset', default='CIFAR100')
 parser.add_argument('--mode', type=str, default='super')
 parser.add_argument('--image_size', type=int, default=32)
 parser.add_argument('--label_ratio', type=float, default=0.2, help="Labeled data ratio")
-parser.add_argument('--batch_size', type=int, default=128)
-parser.add_argument('--test_size', type=int, default=64)
+parser.add_argument('--batch_size', type=int, default=256)
+parser.add_argument('--test_size', type=int, default=128)
 parser.add_argument('--num_workers', type=int, default=0)
 # Model Settings
 parser.add_argument('--model_name', type=str, default='Reduced_ResNet18')
@@ -49,7 +50,7 @@ def train(epoch, model, labeled_trainloader, unlabeled_trainloader, criterion, o
     losses_ul = AverageMeter()
     losses_total = AverageMeter()
 
-    num_iter = (len(labeled_trainloader.dataset)//args.batch_size)
+    num_iter = math.ceil(len(labeled_trainloader.dataset) / args.batch_size)
     unlabeled_train_iter = iter(unlabeled_trainloader)
 
     for batch_idx, (xl, y) in enumerate(labeled_trainloader):
