@@ -11,15 +11,13 @@ class AverageMeter(object):
         self.reset()
 
     def reset(self):
-        self.val = 0
         self.avg = 0
         self.sum = 0
         self.count = 0
 
     def update(self, val, n=1):
         if n > 0:
-            self.val = val
-            self.sum += val * n
+            self.sum = val
             self.count += n
             self.avg = float(self.sum) / self.count
 

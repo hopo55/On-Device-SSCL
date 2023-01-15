@@ -87,7 +87,7 @@ def train(epoch, model, labeled_trainloader, unlabeled_trainloader, criterion, o
         losses_total.update(total_loss)
 
         correct = predicted.eq(y).cpu().sum().item()
-        acc.update(correct, y.size(0))
+        acc.update(correct)
 
         sys.stdout.write('\r')
         sys.stdout.write('%s-%s | Epoch [%3d/%3d] Iter[%3d/%3d]\t Labeled loss: %.2f  Unlabeled loss: %.2f Total Loss: %.4f  Accuracy: %.2f' % (args.dataset, args.mode, epoch+1, args.epoch, batch_idx+1, num_iter, l_loss, ul_loss, total_loss, acc.avg))
@@ -108,7 +108,7 @@ def test(task, model, test_loader):
             _, predicted = torch.max(output, dim=1)
 
             correct = predicted.eq(y).cpu().sum().item()
-            acc.update(correct, y.size(0))
+            acc.update(correct)
 
             sys.stdout.write('\r')
             sys.stdout.write("Test | Accuracy (Test Dataset Up to Task-%d): %.2f%%" % (task+1, acc.avg))
