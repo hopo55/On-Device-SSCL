@@ -20,24 +20,23 @@ parser = argparse.ArgumentParser()
 # General Settings
 parser.add_argument('--seed', type=int, default=0)
 parser.add_argument('--device', type=int, default=0)
-parser.add_argument('--device_name', type=str, default='jetson_4gb')
+parser.add_argument('--device_name', type=str, default='cal_05')
 # Dataset Settings
 parser.add_argument('--root', type=str, default='./data/')
 parser.add_argument('--dataset', default='CIFAR100')
 parser.add_argument('--mode', type=str, default='super')
 parser.add_argument('--image_size', type=int, default=32)
 parser.add_argument('--label_ratio', type=float, default=0.2, help="Labeled data ratio")
-parser.add_argument('--batch_size', type=int, default=32)
-parser.add_argument('--test_size', type=int, default=16)
+parser.add_argument('--batch_size', type=int, default=128)
+parser.add_argument('--test_size', type=int, default=64)
 parser.add_argument('--num_workers', type=int, default=0)
 # Model Settings
 parser.add_argument('--model_name', type=str, default='Reduced_ResNet18')
-parser.add_argument('--epoch', type=int, default=10)
+parser.add_argument('--epoch', type=int, default=100)
 parser.add_argument('--lr', '--learning_rate', type=float, default=0.1)
 parser.add_argument('--lambda_u', type=float, default=1.)
 parser.add_argument('--num_class', type=int, default=100)
-
-# Not yet used
+parser.add_argument('--sampling', type=str, default='Random')
 parser.add_argument('--buffer_size', type=int, default=500, help="size of buffer for replay")
 
 args = parser.parse_args()
@@ -145,13 +144,16 @@ def main():
     # For plotting the logs
     sscl_logger = SSCL_logger('logs/' + args.dataset + '/sscl_logs_' + args.device_name + '_')
 
+    sscl_logger.config(config=args)
+
     if args.dataset == 'CIFAR10':
         task_mode_list = ['Task-1', 'Task-2', 'Task-3', 'Task-4', 'Task-5']
     elif args.dataset == 'CIFAR100':
         task_mode_list = ['Task-1', 'Task-2', 'Task-3', 'Task-4', 'Task-5', 'Task-6', 'Task-7', 'Task-8', 'Task-9', 'Task-10', 'Task-11', 'Task-12', 'Task-13', 'Task-14', 'Task-15', 'Task-16', 'Task-17', 'Task-18', 'Task-19', 'Task-20']
+    
+    data_loader = dataloader.dataloader(args)
 
     for t, task_mode in enumerate(task_mode_list):
-        data_loader = dataloader.dataloader(args)
         labeled_trainloader, unlabeled_trainloader = data_loader.load(t)
         test_loader = data_loader.load(t, train=False)
 
@@ -178,10 +180,10 @@ def main():
                 sscl_logger.result('SSCL Train Epoch Loss/Unlabeled', ul_loss, epoch)
                 sscl_logger.result('SSCL Train Epoch Loss/Total', total_loss, epoch)
 
-        sscl_logger.result('SSCL Train Accuracy', best_acc, t)
+        sscl_logger.result('SSCL Train Accuracy', best_acc, t+1)
 
         test_acc = test(t, model, test_loader)
-        sscl_logger.result('SSCL Test Accuracy', test_acc, t)
+        sscl_logger.result('SSCL Test Accuracy', test_acc, t+1)
 
         scheduler.step()
 

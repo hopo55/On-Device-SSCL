@@ -1,9 +1,12 @@
 import os
+import random
 import autoaugment
 import numpy as np
 from PIL import Image
 import torchvision.transforms as transforms
 from torch.utils.data import Dataset, DataLoader
+
+from collections import Counter
 
 dataset_stats = {
     'CIFAR10' : {'mean': (0.49139967861519607, 0.48215840839460783, 0.44653091444546567),
@@ -46,8 +49,9 @@ def get_transform(dataset_name='CIFAR100', aug_type='none'):
         return transform_none
 
 class dataset(Dataset):
-    def __init__(self, args, task, train=True, lab=True):
+    def __init__(self, args, task, train=True, lab=True, buffer=None):
         self.root = os.path.join(args.root, args.dataset)
+        self.args = args
         self.train = train
         self.lab = lab
         self.transform = {
@@ -71,6 +75,40 @@ class dataset(Dataset):
                 train_yl = np.squeeze(np.load(labeled_file))
                 self.train_xl = train_xl
                 self.train_yl = train_yl
+
+                if buffer is not None:
+                    buffer_size, remainder = divmod(self.args.buffer_size, (task + 1))
+                    sample_list = list(range(len(self.train_xl)))
+                    sample_list = random.sample(sample_list, buffer_size)
+
+                    if task == 0:
+                        self.buffer_x, self.buffer_y = self.train_xl[sample_list], self.train_yl[sample_list]
+                    else:
+                        # Update buffer
+                        temp_buffer_x = []
+                        temp_buffer_y = []
+                        pre_size = self.args.buffer_size // (task)
+
+                        for k in range(task + 1):
+                            if k == task:
+                                if remainder != 0:
+                                    sample_list = list(range(len(self.train_xl)))
+                                    sample_list = random.sample(sample_list, buffer_size+remainder)
+                                temp_buffer_x.extend(self.train_xl[sample_list])
+                                temp_buffer_y.extend(self.train_yl[sample_list])
+                            else:
+                                step = (pre_size*k)+buffer_size
+                                temp_buffer_x.extend(buffer[0][pre_size*k:step])
+                                temp_buffer_y.extend(buffer[1][pre_size*k:step])
+                        
+                        temp_buffer_x = np.array(temp_buffer_x)
+                        temp_buffer_y = np.array(temp_buffer_y)
+
+                        self.buffer_x, self.buffer_y = temp_buffer_x, temp_buffer_y
+
+                        self.train_xl = np.concatenate((self.train_xl, buffer[0]), axis=0)
+                        self.train_yl = np.concatenate((self.train_yl, buffer[1]), axis=0)
+
             else:
                 # load unlabeled data & label
                 unlabeled_image_file = self.root + '/Train/Unlabeled/' + args.dataset + '_Images_Task' + str(task) + '_' + args.mode + '.npy'
@@ -127,19 +165,26 @@ class dataset(Dataset):
             img = self.transform['test'][0](img)            
             return img, target
 
+
 class dataloader():
     def __init__(self, args):
         self.args = args
         self.dataset_name = args.dataset
+        self.split_size = 0
+        self.buffer_x = []
+        self.buffer_y = []
 
     def load(self, task, train=True):
         if train:
-            labeled_dataset = dataset(self.args, task, train)
-            unlabeled_dataset = dataset(self.args, task, lab=False)
+            labeled_dataset = dataset(self.args, task, train, lab=True, buffer=(self.buffer_x, self.buffer_y))
+            unlabeled_dataset = dataset(self.args, task, train, lab=False, buffer=False)
             mu = int(unlabeled_dataset.__len__() / labeled_dataset.__len__())
 
-            labeled_trainloader = DataLoader(labeled_dataset, batch_size=self.args.batch_size, shuffle=True, num_workers=self.args.num_workers, drop_last=True)
-            unlabeled_trainloader = DataLoader(unlabeled_dataset, batch_size=self.args.batch_size*mu, shuffle=True, num_workers=self.args.num_workers, drop_last=True)
+            self.buffer_x = labeled_dataset.buffer_x
+            self.buffer_y = labeled_dataset.buffer_y
+
+            labeled_trainloader = DataLoader(labeled_dataset, batch_size=self.args.batch_size, shuffle=True, num_workers=self.args.num_workers)
+            unlabeled_trainloader = DataLoader(unlabeled_dataset, batch_size=self.args.batch_size*mu, shuffle=True, num_workers=self.args.num_workers)
 
             return labeled_trainloader, unlabeled_trainloader
 
