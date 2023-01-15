@@ -30,6 +30,7 @@ parser.add_argument('--batch_size', type=int, default=128)
 parser.add_argument('--test_size', type=int, default=64)
 parser.add_argument('--num_workers', type=int, default=0)
 # Model Settings
+parser.add_argument('--model_name', type=str, default='Reduced_ResNet18')
 parser.add_argument('--epoch', type=int, default=10)
 parser.add_argument('--lr', '--learning_rate', type=float, default=0.1)
 parser.add_argument('--lambda_u', type=float, default=1.)
@@ -130,7 +131,7 @@ def main():
     root = os.path.join(args.root, args.dataset)
 
     # Create Model
-    model = resnet.Reduced_ResNet18(args.num_class)
+    model = resnet.__dict__[args.model_name](args.num_class)
     model.to(args.device)
 
     # Semi-Supervised Loss
