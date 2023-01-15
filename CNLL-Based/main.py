@@ -32,13 +32,16 @@ parser.add_argument('--batch_size', type=int, default=256)
 parser.add_argument('--test_size', type=int, default=128)
 parser.add_argument('--num_workers', type=int, default=0)
 # Model Settings
-parser.add_argument('--model_name', type=str, default='Reduced_ResNet18')
+# parser.add_argument('--model_name', type=str, default='Reduced_ResNet18')
+parser.add_argument('--model_name', type=str, default='ResNet18_NCM')
 parser.add_argument('--epoch', type=int, default=100)
 parser.add_argument('--lr', '--learning_rate', type=float, default=0.1)
 parser.add_argument('--lambda_u', type=float, default=1.)
 parser.add_argument('--num_class', type=int, default=100)
 parser.add_argument('--sampling', type=str, default='Random')
 parser.add_argument('--buffer_size', type=int, default=500, help="size of buffer for replay")
+# NCM Settings
+
 
 args = parser.parse_args()
 
@@ -60,18 +63,34 @@ def train(epoch, model, labeled_trainloader, unlabeled_trainloader, criterion, o
         x_weak, x_strong = x_weak.to(args.device), x_strong.to(args.device)
 
         # Labeled samples training
-        l_logits = model(xl)
+        l_logits = model(xl, y)
         l_loss = criterion(l_logits, y)
         _, predicted = torch.max(l_logits, dim=1)
 
-        # Pseudo-Label
-        weak_logits = model(x_weak)
-        prob_ul = torch.softmax(weak_logits, dim=1)
-        max_probs, pseudo = torch.max(prob_ul, dim=1)
-        mask = max_probs.ge(0.5).float()
 
-        # Unlabeled samples training
-        strong_logits = model(x_strong)
+        if args.model_name == 'ResNet18_NCM':
+            # Pseudo-Label
+            weak_feature = model.features(x_weak)
+            weak_logits = model.ncm_logits(weak_feature)
+            prob_ul = torch.softmax(weak_logits, dim=1)
+            max_probs, pseudo = torch.max(prob_ul, dim=1)
+            mask = max_probs.ge(0.5).float()
+            
+            # Unlabeled samples training
+            strong_logits = model(x_strong, pseudo)
+
+        else:
+            # Pseudo-Label
+            weak_feature = model.features(x_weak)
+            weak_logits = model.logits(weak_feature)
+            prob_ul = torch.softmax(weak_logits, dim=1)
+            max_probs, pseudo = torch.max(prob_ul, dim=1)
+            mask = max_probs.ge(0.5).float()
+
+            # Unlabeled samples training
+            strong_feature = model.features(x_strong)
+            strong_logits = model.logits(strong_feature)
+
         ul_loss = F.cross_entropy(strong_logits, pseudo, reduction='none') * mask
         ul_loss = ul_loss.mean()
 
@@ -105,7 +124,7 @@ def test(task, model, test_loader):
         for x, y in test_loader:
             x, y = x.to(args.device), y.to(args.device)
 
-            output = model(x)
+            output = model(x, y)
             _, predicted = torch.max(output, dim=1)
 
             correct = predicted.eq(y).cpu().sum().item()
@@ -132,10 +151,13 @@ def main():
     root = os.path.join(args.root, args.dataset)
 
     # Create Model
-    model = resnet.__dict__[args.model_name](args.num_class)
+    model_name = args.model_name
+    if model_name == 'ResNet18_NCM':
+        model = resnet.__dict__[args.model_name](args.num_class, device=args.device)
+    else:
+        model = resnet.__dict__[args.model_name](args.num_class)
     model.to(args.device)
 
-    # Semi-Supervised Loss
     criterion = nn.CrossEntropyLoss()
 
     # Optimizer and Scheduler

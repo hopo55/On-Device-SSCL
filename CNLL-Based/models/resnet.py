@@ -69,16 +69,21 @@ class Bottleneck(nn.Module):
         return out
 
 class ResNet(nn.Module):
-    def __init__(self, block, num_blocks, num_classes, nf, bias, ncm=False):
+    def __init__(self, block, num_blocks, num_classes, nf, bias, ncm=False, device=0):
         super(ResNet, self).__init__()
         self.in_planes = nf
+        self.ncm = ncm
         self.conv1 = conv3x3(3, nf * 1)
         self.bn1 = nn.BatchNorm2d(nf * 1)
         self.layer1 = self._make_layer(block, nf * 1, num_blocks[0], stride=1)
         self.layer2 = self._make_layer(block, nf * 2, num_blocks[1], stride=2)
         self.layer3 = self._make_layer(block, nf * 4, num_blocks[2], stride=2)
         self.layer4 = self._make_layer(block, nf * 8, num_blocks[3], stride=2)
-        self.last = nn.Linear(nf * 8 * block.expansion, num_classes, bias=bias)
+
+        if self.ncm:
+            self.ncm_classifier = NearestClassMean(nf * 8 * block.expansion, num_classes, device)
+        else:
+            self.last = nn.Linear(nf * 8 * block.expansion, num_classes, bias=bias)
 
 
     def _make_layer(self, block, planes, num_blocks, stride):
@@ -105,36 +110,28 @@ class ResNet(nn.Module):
         x = self.last(x)
         return x
 
-    def forward(self, x):
+    def ncm_logits(self, x):
+        '''Apply the last FC linear mapping to get logits'''
+        x = self.ncm_classifier.predict(x)
+        return x
+
+    def forward(self, x, y):
         out = self.features(x)
-        logits = self.logits(out)
+        if self.ncm:
+            self.ncm_classifier.fit_batch(out, y)
+            logits = self.ncm_classifier.predict(out)
+        else:
+            logits = self.logits(out)
+
         return logits
 
 class NearestClassMean(nn.Module):
-    """
-    "Online Continual Learning for Embedded Devices"
-    This is an implementation of the Nearest Class Mean algorithm for streaming learning.
-    Code from https://github.com/tyler-hayes/Embedded-CL
-    """
-
-    def __init__(self, input_shape, num_classes, backbone=None, device='cuda'):
-        """
-        Init function for the NCM model.
-        :param input_shape: feature dimension
-        :param num_classes: number of total classes in stream
-        """
-
+    def __init__(self, input_shape, num_classes, device='cuda'):
         super(NearestClassMean, self).__init__()
-
         # NCM parameters
         self.device = device
-        self.in_features = input_shape
+        self.input_shape = input_shape
         self.num_classes = num_classes
-
-        # feature extraction backbone
-        self.backbone = backbone
-        if backbone is not None:
-            self.backbone = backbone.eval().to(device)
 
         # setup weights for NCM
         self.muK = torch.zeros((num_classes, input_shape)).to(self.device)
@@ -142,22 +139,13 @@ class NearestClassMean(nn.Module):
         self.num_updates = 0
 
     @torch.no_grad()
-    def fit(self, x, y, item_ix):
-        """
-        Fit the NCM model to a new sample (x,y).
-        :param item_ix:
-        :param x: a torch tensor of the input data (must be a vector)
-        :param y: a torch tensor of the input label
-        :return: None
-        """
+    def fit(self, x, y):
         x = x.to(self.device)
         y = y.long().to(self.device)
 
         # make sure things are the right shape
-        print('x shape', len(x.shape))
         if len(x.shape) < 2:
             x = x.unsqueeze(0)
-        print('y shape', len(y.shape))
         if len(y.shape) == 0:
             y = y.unsqueeze(0)
 
@@ -182,7 +170,7 @@ class NearestClassMean(nn.Module):
         return -dist
 
     @torch.no_grad()
-    def predict(self, X, return_probas=False):
+    def predict(self, X, probas=False):
         """
         Make predictions on test data X.
         :param X: a torch tensor that contains N data samples (N x d)
@@ -190,56 +178,42 @@ class NearestClassMean(nn.Module):
         :return: the test predictions or probabilities
         """
         X = X.to(self.device)
-
         scores = self.find_dists(self.muK, X)
 
         # mask off predictions for unseen classes
         not_visited_ix = torch.where(self.cK == 0)[0]
         min_col = torch.min(scores, dim=1)[0].unsqueeze(0) - 1
-        scores[:, not_visited_ix] = min_col.tile(len(not_visited_ix)).reshape(
-            len(not_visited_ix), len(X)).transpose(1, 0)  # mask off scores for unseen classes
+        scores[:, not_visited_ix] = min_col.tile(len(not_visited_ix)).reshape(len(not_visited_ix), len(X)).transpose(1, 0)  # mask off scores for unseen classes
 
-        # return predictions or probabilities
-        if not return_probas:
-            return scores.cpu()
+        if not probas:
+            return scores
         else:
-            return torch.softmax(scores, dim=1).cpu()
+            return torch.softmax(scores, dim=1)
 
     @torch.no_grad()
-    def ood_predict(self, x):
-        return self.predict(x, return_probas=True)
-
-    @torch.no_grad()
-    def evaluate_ood_(self, test_loader):
-        print('\nTesting OOD on %d images.' % len(test_loader.dataset))
-
-        num_samples = len(test_loader.dataset)
-        scores = torch.empty((num_samples, self.num_classes))
-        labels = torch.empty(num_samples).long()
-        start = 0
-        for test_x, test_y in test_loader:
-            if self.backbone is not None:
-                batch_x_feat = self.backbone(test_x.to(self.device))
-            else:
-                batch_x_feat = test_x.to(self.device)
-            ood_scores = self.ood_predict(batch_x_feat)
-            end = start + ood_scores.shape[0]
-            scores[start:end] = ood_scores
-            labels[start:end] = test_y.squeeze()
-            start = end
-
-        return scores, labels
-
-    @torch.no_grad()
-    def fit_batch(self, batch_x, batch_y, batch_ix):
+    def fit_batch(self, batch_x, batch_y):
         # fit NCM one example at a time
         for x, y in zip(batch_x, batch_y):
-            self.fit(x.cpu(), y.view(1, ), None)
+            self.fit(x.cpu(), y.view(1, ))
+
+    @torch.no_grad()
+    def predict_batch(self, batch_x, batch_y):
+        num_samples = len(batch_x)
+        probabilities = torch.empty((num_samples, self.num_classes))
+        labels = torch.empty(num_samples).long()
+        start = 0
+
+        for batch_x_feat, batch_target in zip(batch_x, batch_y):
+            probas = self.predict(batch_x_feat, probas=True)
+            end = start + probas.shape[0]
+            probabilities[start:end] = probas
+            labels[start:end] = batch_target.squeeze()
+            start = end
+
+        return probabilities, labels
 
     @torch.no_grad()
     def train_(self, train_loader):
-        # print('\nTraining on %d images.' % len(train_loader.dataset))
-
         for batch_x, batch_y, batch_ix in train_loader:
             if self.backbone is not None:
                 batch_x_feat = self.backbone(batch_x.to(self.device))
@@ -269,12 +243,6 @@ class NearestClassMean(nn.Module):
         return probabilities, labels
 
     def save_model(self, save_path, save_name):
-        """
-        Save the model parameters to a torch file.
-        :param save_path: the path where the model will be saved
-        :param save_name: the name for the saved file
-        :return:
-        """
         # grab parameters for saving
         d = dict()
         d['muK'] = self.muK.cpu()
@@ -285,12 +253,6 @@ class NearestClassMean(nn.Module):
         torch.save(d, os.path.join(save_path, save_name + '.pth'))
 
     def load_model(self, save_file):
-        """
-        Load the model parameters into StreamingLDA object.
-        :param save_path: the path where the model is saved
-        :param save_name: the name of the saved file
-        :return:
-        """
         # load parameters
         print('\nloading ckpt from: %s' % save_file)
         d = torch.load(os.path.join(save_file))
@@ -299,11 +261,12 @@ class NearestClassMean(nn.Module):
         self.num_updates = d['num_updates']
 
 
+
 '''
 See https://github.com/kuangliu/pytorch-cifar/blob/master/models/resnet.py
 '''
-def ResNet18_NCM(out_dim=10, nf=20, bias=True):
-    return ResNet(BasicBlock, [2, 2, 2, 2], out_dim, nf, bias, ncm=True)
+def ResNet18_NCM(out_dim=10, nf=20, bias=True, device=0):
+    return ResNet(BasicBlock, [2, 2, 2, 2], out_dim, nf, bias, ncm=True, device=device)
 
 # Reduced ResNet18 as in GEM MIR(note that nf=20).
 def Reduced_ResNet18(out_dim=10, nf=20, bias=True):
