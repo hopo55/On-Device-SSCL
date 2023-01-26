@@ -10,15 +10,54 @@ class CIFAR10(datasets.CIFAR10):
     name = 'CIFAR10'
     num_classes = 10
 
-    def __init__(self, args, train=True, semi=False):
-        pass
+    def __init__(self, args, train=True, semi=False, lab=True):
+        self.split_data = []
+        self.split_target = []
+        self.root = os.path.join(args.root, args.dataset)
+
+        transform = transforms.Compose([transforms.Resize((args.image_size, args.image_size)),
+                                        transforms.ToTensor()])
+
+        datasets.CIFAR10.__init__(self, root=self.root, train=train, transform=transform, download=True)
+
+        for y in range(self.num_classes):
+
+            cls_idx = torch.nonzero(torch.Tensor(self.targets) == y)
+            
+            if train and semi:
+                split_point = int(len(cls_idx)*args.label_ratio)
+
+                if lab: cls_idx = cls_idx[:split_point]
+                else: cls_idx = cls_idx[split_point:]
+
+            self.split_data = [self.data[loc] for loc in cls_idx]
+            self.split_target = [self.targets[loc] for loc in cls_idx]
+
+            if train:
+                save_path = self.root + '/Train'
+                if not os.path.exists(save_path): os.mkdir(save_path)
+                if lab: save_path = save_path + '/Labeled'
+                else: save_path = save_path + '/Unlabeled'
+                if not os.path.exists(save_path): os.mkdir(save_path)
+            else:
+                save_path = self.root + '/Test'
+                if not os.path.exists(save_path): os.mkdir(save_path)
+            
+            t = str(y) + '_'
+            np.save(os.path.join(save_path, args.dataset + '_Images_Task' + t + args.mode), np.array(self.split_data))
+            np.save(os.path.join(save_path, args.dataset + '_Labels_Task' + t + args.mode), np.array(self.split_target))
+
+    def __getitem__(self, index):
+        x, y = self.split_data[index], self.split_target[index]
+        
+        return x, y
+
 
 class CIFAR100(datasets.CIFAR100):
     name = 'CIFAR100'
     num_classes = 100
 
     def __init__(self, args, train=True, semi=False, lab=True):
-        self.subsets = dict()
         self.mode = args.mode
         self.root = os.path.join(args.root, args.dataset)
 
@@ -101,10 +140,7 @@ DATASET = {
     CIFAR100.name: CIFAR100
 }
 
-def CIFAR10_Generator():
-    pass
-
-def CIFAR100_Generator(args):
+def CIFAR_Generator(args):
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)

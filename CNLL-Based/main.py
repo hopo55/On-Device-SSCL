@@ -24,20 +24,23 @@ parser.add_argument('--device', type=int, default=0)
 parser.add_argument('--device_name', type=str, default='cal_05')
 # Dataset Settings
 parser.add_argument('--root', type=str, default='./data/')
-parser.add_argument('--dataset', default='CIFAR100')
-parser.add_argument('--mode', type=str, default='super')
+parser.add_argument('--dataset', default='CIFAR10')
+# parser.add_argument('--dataset', default='CIFAR100')
+parser.add_argument('--mode', type=str, default='vanilla', help="vanilla|super")
+# parser.add_argument('--mode', type=str, default='super', help="vanilla|super")
 parser.add_argument('--image_size', type=int, default=32)
 parser.add_argument('--label_ratio', type=float, default=0.2, help="Labeled data ratio")
 parser.add_argument('--batch_size', type=int, default=256)
 parser.add_argument('--test_size', type=int, default=128)
 parser.add_argument('--num_workers', type=int, default=0)
 # Model Settings
-# parser.add_argument('--model_name', type=str, default='Reduced_ResNet18')
-parser.add_argument('--model_name', type=str, default='ResNet18_NCM')
-parser.add_argument('--epoch', type=int, default=100)
+parser.add_argument('--model_name', type=str, default='Reduced_ResNet18')
+# parser.add_argument('--model_name', type=str, default='ResNet18_NCM')
+parser.add_argument('--epoch', type=int, default=10)
 parser.add_argument('--lr', '--learning_rate', type=float, default=0.1)
 parser.add_argument('--lambda_u', type=float, default=1.)
-parser.add_argument('--num_class', type=int, default=100)
+parser.add_argument('--num_class', type=int, default=10)
+# parser.add_argument('--num_class', type=int, default=100)
 parser.add_argument('--sampling', type=str, default='Random')
 parser.add_argument('--buffer_size', type=int, default=500, help="size of buffer for replay")
 # NCM Settings
@@ -128,13 +131,13 @@ def test(task, model, test_loader):
             _, predicted = torch.max(output, dim=1)
 
             correct = predicted.eq(y).cpu().sum().item()
-            acc.update(correct)
+            acc.update(correct, len(y))
 
             sys.stdout.write('\r')
-            sys.stdout.write("Test | Accuracy (Test Dataset Up to Task-%d): %.2f%%" % (task+1, acc.avg))
+            sys.stdout.write("Test | Accuracy (Test Dataset Up to Task-%d): %.2f%%" % (task+1, acc.avg*100))
             sys.stdout.flush()
 
-    return acc.avg
+    return acc.avg*100
 
 def main():
     ## GPU Setup
@@ -147,7 +150,8 @@ def main():
     cudnn.benchmark = True
 
     # Dataset Generator
-    data_generator.__dict__[args.dataset + '_Generator'](args)
+    if 'CIFAR' in args.dataset:
+        data_generator.__dict__['CIFAR_Generator'](args)
     root = os.path.join(args.root, args.dataset)
 
     # Create Model
