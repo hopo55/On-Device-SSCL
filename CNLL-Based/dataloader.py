@@ -77,7 +77,10 @@ class dataset(Dataset):
                 self.train_yl = train_yl
 
                 if buffer is not None:
-                    buffer_size, remainder = divmod(self.args.buffer_size, (task + 1))
+                    buffer_size, remainder = divmod(args.buffer_size, (task + 1))
+                    if buffer_size > len(self.train_xl):
+                        buffer_size, remainder = divmod(len(self.train_xl), (task + 1))
+
                     sample_list = list(range(len(self.train_xl)))
                     sample_list = random.sample(sample_list, buffer_size)
 
@@ -179,6 +182,7 @@ class dataloader():
             labeled_dataset = dataset(self.args, task, train, lab=True, buffer=(self.buffer_x, self.buffer_y))
             unlabeled_dataset = dataset(self.args, task, train, lab=False, buffer=False)
             mu = int(unlabeled_dataset.__len__() / labeled_dataset.__len__())
+            if mu == 0: mu = 1
 
             self.buffer_x = labeled_dataset.buffer_x
             self.buffer_y = labeled_dataset.buffer_y

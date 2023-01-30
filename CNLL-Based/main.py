@@ -11,10 +11,11 @@ import torch.optim as optim
 import torch.nn.functional as F
 import torch.backends.cudnn as cudnn
 
+import sampling
+import dataloader
+import data_generator
 from models import resnet
 from losses import SupConLoss
-import data_generator
-import dataloader
 from metric import AverageMeter, SSCL_logger
 
 parser = argparse.ArgumentParser()
@@ -24,31 +25,31 @@ parser.add_argument('--device', type=int, default=0)
 parser.add_argument('--device_name', type=str, default='cal_05')
 # Dataset Settings
 parser.add_argument('--root', type=str, default='./data/')
-parser.add_argument('--dataset', default='CIFAR10')
-# parser.add_argument('--dataset', default='CIFAR100')
-parser.add_argument('--mode', type=str, default='vanilla', help="vanilla|super")
-# parser.add_argument('--mode', type=str, default='super', help="vanilla|super")
+# parser.add_argument('--dataset', default='CIFAR10')
+parser.add_argument('--dataset', default='CIFAR100')
+# parser.add_argument('--mode', type=str, default='vanilla', help="vanilla|super")
+parser.add_argument('--mode', type=str, default='super', help="vanilla|super")
 parser.add_argument('--image_size', type=int, default=32)
 parser.add_argument('--label_ratio', type=float, default=0.2, help="Labeled data ratio")
-parser.add_argument('--batch_size', type=int, default=256)
-parser.add_argument('--test_size', type=int, default=128)
+parser.add_argument('--batch_size', type=int, default=128)
+parser.add_argument('--test_size', type=int, default=64)
 parser.add_argument('--num_workers', type=int, default=0)
 # Model Settings
-parser.add_argument('--model_name', type=str, default='Reduced_ResNet18')
+parser.add_argument('--model_name', type=str, default='ResNet18')
+# parser.add_argument('--model_name', type=str, default='Reduced_ResNet18')
 # parser.add_argument('--model_name', type=str, default='ResNet18_NCM')
 parser.add_argument('--epoch', type=int, default=10)
 parser.add_argument('--lr', '--learning_rate', type=float, default=0.1)
 parser.add_argument('--lambda_u', type=float, default=1.)
-parser.add_argument('--num_class', type=int, default=10)
-# parser.add_argument('--num_class', type=int, default=100)
+# parser.add_argument('--num_class', type=int, default=10)
+parser.add_argument('--num_class', type=int, default=100)
 parser.add_argument('--sampling', type=str, default='Random')
 parser.add_argument('--buffer_size', type=int, default=500, help="size of buffer for replay")
 # NCM Settings
 
-
 args = parser.parse_args()
 
-def train(epoch, model, labeled_trainloader, unlabeled_trainloader, criterion, optimizer):
+def train(epoch, task, model, labeled_trainloader, unlabeled_trainloader, criterion, optimizer):
     model.train()
 
     acc = AverageMeter()
@@ -69,7 +70,6 @@ def train(epoch, model, labeled_trainloader, unlabeled_trainloader, criterion, o
         l_logits = model(xl, y)
         l_loss = criterion(l_logits, y)
         _, predicted = torch.max(l_logits, dim=1)
-
 
         if args.model_name == 'ResNet18_NCM':
             # Pseudo-Label
@@ -179,6 +179,8 @@ def main():
         task_mode_list = ['Task-1', 'Task-2', 'Task-3', 'Task-4', 'Task-5', 'Task-6', 'Task-7', 'Task-8', 'Task-9', 'Task-10', 'Task-11', 'Task-12', 'Task-13', 'Task-14', 'Task-15', 'Task-16', 'Task-17', 'Task-18', 'Task-19', 'Task-20']
     
     data_loader = dataloader.dataloader(args)
+    
+    avg_test_acc = AverageMeter()
 
     for t, task_mode in enumerate(task_mode_list):
         labeled_trainloader, unlabeled_trainloader = data_loader.load(t)
@@ -193,13 +195,14 @@ def main():
         print("Number of Samples:", num_samples, class_name)
 
         weight = torch.zeros(args.num_class)
-        weight[class_name] = 1
+        # weight[class_name] = 1
+        weight[t] = 1
         weight = weight.cuda()
         criterion = nn.CrossEntropyLoss(weight = weight)
 
         best_acc = 0
         for epoch in range(args.epoch):
-            l_loss, ul_loss, total_loss, train_acc = train(epoch, model, labeled_trainloader, unlabeled_trainloader, criterion, optimizer)
+            l_loss, ul_loss, total_loss, train_acc = train(epoch, t, model, labeled_trainloader, unlabeled_trainloader, criterion, optimizer)
 
             if train_acc > best_acc:
                 best_acc = train_acc
@@ -210,9 +213,14 @@ def main():
         sscl_logger.result('SSCL Train Accuracy', best_acc, t+1)
 
         test_acc = test(t, model, test_loader)
+        avg_test_acc.update(test_acc)
         sscl_logger.result('SSCL Test Accuracy', test_acc, t+1)
 
         scheduler.step()
+
+    sscl_logger.result('SSCL Average Test Accuracy', avg_test_acc.avg, 1)
+    # the average test accuracy over all tasks
+    print("Average Test Accuracy : ", avg_test_acc.avg)
 
 
 if __name__ == '__main__':

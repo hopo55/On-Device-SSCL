@@ -84,6 +84,7 @@ class ResNet(nn.Module):
             self.ncm_classifier = NearestClassMean(nf * 8 * block.expansion, num_classes, device)
         else:
             self.last = nn.Linear(nf * 8 * block.expansion, num_classes, bias=bias)
+            print(nf * 8 * block.expansion)
 
 
     def _make_layer(self, block, planes, num_blocks, stride):
