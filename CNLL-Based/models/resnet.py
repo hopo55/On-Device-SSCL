@@ -73,6 +73,15 @@ class ResNet(nn.Module):
         super(ResNet, self).__init__()
         self.in_planes = nf
         self.ncm = ncm
+        
+        self.prev_muK = []
+        self.prev_cK = []
+        self.prev_num_updates = 0
+
+        self.device = device
+        self.num_classes = num_classes
+        self.feature_size = nf * 8 * block.expansion
+
         self.conv1 = conv3x3(3, nf * 1)
         self.bn1 = nn.BatchNorm2d(nf * 1)
         self.layer1 = self._make_layer(block, nf * 1, num_blocks[0], stride=1)
@@ -81,11 +90,9 @@ class ResNet(nn.Module):
         self.layer4 = self._make_layer(block, nf * 8, num_blocks[3], stride=2)
 
         if self.ncm:
-            self.ncm_classifier = NearestClassMean(nf * 8 * block.expansion, num_classes, device)
+            self.ncm_classifier = NearestClassMean(self.feature_size, self.num_classes, self.device)
         else:
-            self.last = nn.Linear(nf * 8 * block.expansion, num_classes, bias=bias)
-            print(nf * 8 * block.expansion)
-
+            self.last = nn.Linear(self.feature_size, self.num_classes, bias=bias)
 
     def _make_layer(self, block, planes, num_blocks, stride):
         strides = [stride] + [1] * (num_blocks - 1)
@@ -116,6 +123,20 @@ class ResNet(nn.Module):
         x = self.ncm_classifier.predict(x)
         return x
 
+    def init_ncm(self, task, start, end):
+        if task == 0 and start != end:
+            self.ncm_classifier.muK = torch.zeros((self.num_classes, self.feature_size)).to(self.device)
+            self.ncm_classifier.cK = torch.zeros(self.num_classes).to(self.device)
+            self.ncm_classifier.num_updates = 0
+        elif start == end:
+            self.prev_muK = self.ncm_classifier.muK
+            self.prev_cK = self.ncm_classifier.cK
+            self.prev_num_updates = self.ncm_classifier.num_updates
+        else:
+            self.ncm_classifier.muK = self.prev_muK
+            self.ncm_classifier.cK = self.prev_cK
+            self.ncm_classifier.num_updates = self.prev_num_updates
+
     def forward(self, x, y):
         out = self.features(x)
         if self.ncm:
@@ -125,7 +146,7 @@ class ResNet(nn.Module):
             logits = self.logits(out)
 
         return logits
-
+  
 class NearestClassMean(nn.Module):
     def __init__(self, input_shape, num_classes, device='cuda'):
         super(NearestClassMean, self).__init__()
@@ -168,7 +189,8 @@ class NearestClassMean(nn.Module):
             B = torch.reshape(B, (M, 1, d))  # reshaping for broadcasting
             square_sub = torch.mul(A - B, A - B)  # square all elements
             dist = torch.sum(square_sub, dim=2)
-        return -dist
+        # return -dist # why use minus?
+        return dist
 
     @torch.no_grad()
     def predict(self, X, probas=False):
@@ -183,7 +205,8 @@ class NearestClassMean(nn.Module):
 
         # mask off predictions for unseen classes
         not_visited_ix = torch.where(self.cK == 0)[0]
-        min_col = torch.min(scores, dim=1)[0].unsqueeze(0) - 1
+        # min_col = torch.min(scores, dim=1)[0].unsqueeze(0) - 1 # ????
+        min_col = torch.min(scores, dim=1)[0].unsqueeze(0)
         scores[:, not_visited_ix] = min_col.tile(len(not_visited_ix)).reshape(len(not_visited_ix), len(X)).transpose(1, 0)  # mask off scores for unseen classes
 
         if not probas:
@@ -266,7 +289,7 @@ class NearestClassMean(nn.Module):
 '''
 See https://github.com/kuangliu/pytorch-cifar/blob/master/models/resnet.py
 '''
-def ResNet18_NCM(out_dim=10, nf=20, bias=True, device=0):
+def ResNet18_NCM(out_dim=10, nf=64, bias=True, device=0):
     return ResNet(BasicBlock, [2, 2, 2, 2], out_dim, nf, bias, ncm=True, device=device)
 
 # Reduced ResNet18 as in GEM MIR(note that nf=20).

@@ -36,7 +36,6 @@ class CIFAR10(datasets.CIFAR10):
                 
                 for y in cls_idx:
                     sup_classes = torch.nonzero(torch.Tensor(self.targets) == y)
-                print(len(sup_classes))
         else:
 
             for y in range(self.num_classes):

@@ -77,10 +77,12 @@ class dataset(Dataset):
                 self.train_yl = train_yl
 
                 if buffer is not None:
-                    buffer_size, remainder = divmod(args.buffer_size, (task + 1))
-                    if buffer_size > len(self.train_xl):
-                        buffer_size, remainder = divmod(len(self.train_xl), (task + 1))
-
+                    max_size = len(buffer[0]) + len(self.train_xl)
+                    if max_size > args.buffer_size:
+                        buffer_size, remainder = divmod(args.buffer_size, (task + 1))
+                    else:
+                        buffer_size = len(self.train_xl)
+                    
                     sample_list = list(range(len(self.train_xl)))
                     sample_list = random.sample(sample_list, buffer_size)
 

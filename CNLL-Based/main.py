@@ -35,12 +35,12 @@ parser.add_argument('--batch_size', type=int, default=128)
 parser.add_argument('--test_size', type=int, default=64)
 parser.add_argument('--num_workers', type=int, default=0)
 # Model Settings
-parser.add_argument('--model_name', type=str, default='ResNet18')
+# parser.add_argument('--model_name', type=str, default='ResNet18')
 # parser.add_argument('--model_name', type=str, default='Reduced_ResNet18')
-# parser.add_argument('--model_name', type=str, default='ResNet18_NCM')
-parser.add_argument('--epoch', type=int, default=10)
+parser.add_argument('--model_name', type=str, default='ResNet18_NCM')
+parser.add_argument('--epoch', type=int, default=1)
 parser.add_argument('--lr', '--learning_rate', type=float, default=0.1)
-parser.add_argument('--lambda_u', type=float, default=1.)
+parser.add_argument('--lambda_u', type=float, default=1., help='penalize the unlabeled loss')
 # parser.add_argument('--num_class', type=int, default=10)
 parser.add_argument('--num_class', type=int, default=100)
 parser.add_argument('--sampling', type=str, default='Random')
@@ -71,7 +71,7 @@ def train(epoch, task, model, labeled_trainloader, unlabeled_trainloader, criter
         l_loss = criterion(l_logits, y)
         _, predicted = torch.max(l_logits, dim=1)
 
-        if args.model_name == 'ResNet18_NCM':
+        if 'NCM' in args.model_name:
             # Pseudo-Label
             weak_feature = model.features(x_weak)
             weak_logits = model.ncm_logits(weak_feature)
@@ -80,7 +80,8 @@ def train(epoch, task, model, labeled_trainloader, unlabeled_trainloader, criter
             mask = max_probs.ge(0.5).float()
             
             # Unlabeled samples training
-            strong_logits = model(x_strong, pseudo)
+            strong_feature = model.features(x_strong)
+            strong_logits = model.ncm_logits(strong_feature)
 
         else:
             # Pseudo-Label
@@ -115,6 +116,9 @@ def train(epoch, task, model, labeled_trainloader, unlabeled_trainloader, criter
         sys.stdout.write('\r')
         sys.stdout.write('%s-%s | Epoch [%3d/%3d] Iter[%3d/%3d]\t Labeled loss: %.2f  Unlabeled loss: %.2f Total Loss: %.4f  Accuracy: %.2f' % (args.dataset, args.mode, epoch+1, args.epoch, batch_idx+1, num_iter, l_loss, ul_loss, total_loss, acc.avg*100))
         sys.stdout.flush()
+
+    if 'NCM' in args.model_name:
+        model.init_ncm(task, epoch, args.epoch)
 
     return l_loss.item(), ul_loss.item(), total_loss.item(), acc.avg*100
 
@@ -156,7 +160,7 @@ def main():
 
     # Create Model
     model_name = args.model_name
-    if model_name == 'ResNet18_NCM':
+    if 'NCM' in model_name:
         model = resnet.__dict__[args.model_name](args.num_class, device=args.device)
     else:
         model = resnet.__dict__[args.model_name](args.num_class)
@@ -195,8 +199,7 @@ def main():
         print("Number of Samples:", num_samples, class_name)
 
         weight = torch.zeros(args.num_class)
-        # weight[class_name] = 1
-        weight[t] = 1
+        weight[class_name] = 1
         weight = weight.cuda()
         criterion = nn.CrossEntropyLoss(weight = weight)
 
@@ -220,7 +223,7 @@ def main():
 
     sscl_logger.result('SSCL Average Test Accuracy', avg_test_acc.avg, 1)
     # the average test accuracy over all tasks
-    print("Average Test Accuracy : ", avg_test_acc.avg)
+    print("\n\nAverage Test Accuracy : %.2f%%" % avg_test_acc.avg)
 
 
 if __name__ == '__main__':
