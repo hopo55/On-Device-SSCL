@@ -73,14 +73,14 @@ class ResNet(nn.Module):
         super(ResNet, self).__init__()
         self.in_planes = nf
         self.ncm = ncm
-        
-        self.prev_muK = []
-        self.prev_cK = []
-        self.prev_num_updates = 0
 
         self.device = device
         self.num_classes = num_classes
         self.feature_size = nf * 8 * block.expansion
+        
+        self.prev_muK = torch.zeros((self.num_classes, self.feature_size)).to(self.device)
+        self.prev_cK = torch.zeros(self.num_classes).to(self.device)
+        self.prev_num_updates = 0
 
         self.conv1 = conv3x3(3, nf * 1)
         self.bn1 = nn.BatchNorm2d(nf * 1)
@@ -189,8 +189,7 @@ class NearestClassMean(nn.Module):
             B = torch.reshape(B, (M, 1, d))  # reshaping for broadcasting
             square_sub = torch.mul(A - B, A - B)  # square all elements
             dist = torch.sum(square_sub, dim=2)
-        # return -dist # why use minus?
-        return dist
+        return -dist # why use minus?
 
     @torch.no_grad()
     def predict(self, X, probas=False):
@@ -205,8 +204,7 @@ class NearestClassMean(nn.Module):
 
         # mask off predictions for unseen classes
         not_visited_ix = torch.where(self.cK == 0)[0]
-        # min_col = torch.min(scores, dim=1)[0].unsqueeze(0) - 1 # ????
-        min_col = torch.min(scores, dim=1)[0].unsqueeze(0)
+        min_col = torch.min(scores, dim=1)[0].unsqueeze(0) - 1 # ????
         scores[:, not_visited_ix] = min_col.tile(len(not_visited_ix)).reshape(len(not_visited_ix), len(X)).transpose(1, 0)  # mask off scores for unseen classes
 
         if not probas:

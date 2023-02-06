@@ -38,13 +38,13 @@ parser.add_argument('--num_workers', type=int, default=0)
 # parser.add_argument('--model_name', type=str, default='ResNet18')
 # parser.add_argument('--model_name', type=str, default='Reduced_ResNet18')
 parser.add_argument('--model_name', type=str, default='ResNet18_NCM')
-parser.add_argument('--epoch', type=int, default=1)
+parser.add_argument('--epoch', type=int, default=10)
 parser.add_argument('--lr', '--learning_rate', type=float, default=0.1)
 parser.add_argument('--lambda_u', type=float, default=1., help='penalize the unlabeled loss')
 # parser.add_argument('--num_class', type=int, default=10)
 parser.add_argument('--num_class', type=int, default=100)
 parser.add_argument('--sampling', type=str, default='Random')
-parser.add_argument('--buffer_size', type=int, default=500, help="size of buffer for replay")
+parser.add_argument('--buffer_size', type=int, default=1000, help="size of buffer for replay")
 # NCM Settings
 
 args = parser.parse_args()
@@ -118,7 +118,7 @@ def train(epoch, task, model, labeled_trainloader, unlabeled_trainloader, criter
         sys.stdout.flush()
 
     if 'NCM' in args.model_name:
-        model.init_ncm(task, epoch, args.epoch)
+        model.init_ncm(task, epoch+1, args.epoch)
 
     return l_loss.item(), ul_loss.item(), total_loss.item(), acc.avg*100
 
