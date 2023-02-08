@@ -1,236 +1,230 @@
 import os
-import time
+import sys
+import math
 import random
 import argparse
 import numpy as np
 
-from models import SLDA, NCM, StreamSoftmax
-from utils import *
-
 import torch
+import torch.nn as nn
+import torch.optim as optim
+import torch.nn.functional as F
 import torch.backends.cudnn as cudnn
 
+import sampling
+import dataloader
+import data_generator
+from models import resnet
+from losses import SupConLoss
+from metric import AverageMeter, SSCL_logger
 
-def get_class_data_loader(args, class_remap, training, min_class, max_class, batch_size=128, shuffle=False,
-                          dataset='places', return_item_ix=False):
-    if dataset == 'mnist' or dataset == 'cifar10' or dataset == 'cifar100':
-        h5_file_path = os.path.join(args.h5_features_dir, '%s_features.h5')
-        if training:
-            data = 'train'
-            return_item_ix = return_item_ix
+parser = argparse.ArgumentParser()
+# General Settings
+parser.add_argument('--seed', type=int, default=0)
+parser.add_argument('--device', type=int, default=0)
+parser.add_argument('--device_name', type=str, default='cal_05')
+# Dataset Settings
+parser.add_argument('--root', type=str, default='./data/')
+# parser.add_argument('--dataset', default='CIFAR10')
+parser.add_argument('--dataset', default='CIFAR100')
+# parser.add_argument('--mode', type=str, default='vanilla', help="vanilla|super")
+parser.add_argument('--mode', type=str, default='super', help="vanilla|super")
+parser.add_argument('--image_size', type=int, default=32)
+parser.add_argument('--label_ratio', type=float, default=0.2, help="Labeled data ratio")
+parser.add_argument('--batch_size', type=int, default=128)
+parser.add_argument('--test_size', type=int, default=64)
+parser.add_argument('--num_workers', type=int, default=0)
+# Model Settings
+# parser.add_argument('--model_name', type=str, default='ResNet18')
+# parser.add_argument('--model_name', type=str, default='Reduced_ResNet18')
+parser.add_argument('--model_name', type=str, default='ResNet18_NCM')
+parser.add_argument('--epoch', type=int, default=10)
+parser.add_argument('--lr', '--learning_rate', type=float, default=0.1)
+parser.add_argument('--lambda_u', type=float, default=1., help='penalize the unlabeled loss')
+# parser.add_argument('--num_class', type=int, default=10)
+parser.add_argument('--num_class', type=int, default=100)
+parser.add_argument('--sampling', type=str, default='Random')
+parser.add_argument('--buffer_size', type=int, default=1000, help="size of buffer for replay")
+# NCM Settings
+
+args = parser.parse_args()
+
+def train(epoch, task, model, labeled_trainloader, unlabeled_trainloader, criterion, optimizer):
+    model.train()
+
+    acc = AverageMeter()
+    losses = AverageMeter()
+    losses_ul = AverageMeter()
+    losses_total = AverageMeter()
+
+    num_iter = math.ceil(len(labeled_trainloader.dataset) / args.batch_size)
+    unlabeled_train_iter = iter(unlabeled_trainloader)
+
+    for batch_idx, (xl, y) in enumerate(labeled_trainloader):
+        xl, y = xl.to(args.device), y.to(args.device)
+
+        x_weak, x_strong, _ = unlabeled_train_iter.next()
+        x_weak, x_strong = x_weak.to(args.device), x_strong.to(args.device)
+
+        # Labeled samples training
+        l_logits = model(xl, y)
+        l_loss = criterion(l_logits, y)
+        _, predicted = torch.max(l_logits, dim=1)
+
+        if 'NCM' in args.model_name:
+            # Pseudo-Label
+            weak_feature = model.features(x_weak)
+            weak_logits = model.ncm_logits(weak_feature)
+            prob_ul = torch.softmax(weak_logits, dim=1)
+            max_probs, pseudo = torch.max(prob_ul, dim=1)
+            mask = max_probs.ge(0.5).float()
+            
+            # Unlabeled samples training
+            strong_feature = model.features(x_strong)
+            strong_logits = model.ncm_logits(strong_feature)
+
         else:
-            data = 'val'
-            return_item_ix = False
-        return make_incremental_features_dataloader(class_remap, h5_file_path % data, min_class, max_class,
-                                                    batch_size=batch_size, shuffle=shuffle,
-                                                    return_item_ix=return_item_ix, num_workers=args.num_workers,
-                                                    in_memory=args.dataset_in_memory)
-    else:
-        raise NotImplementedError('Please implement another dataset.')
+            # Pseudo-Label
+            weak_feature = model.features(x_weak)
+            weak_logits = model.logits(weak_feature)
+            prob_ul = torch.softmax(weak_logits, dim=1)
+            max_probs, pseudo = torch.max(prob_ul, dim=1)
+            mask = max_probs.ge(0.5).float()
 
-def get_iid_data_loader(args, training, batch_size=128, shuffle=False, dataset='cifar10', return_item_ix=False):
-    if dataset == 'mnist' or dataset == 'cifar10' or dataset == 'cifar100':
-        h5_file_path = os.path.join(args.h5_features_dir, '%s_features.h5')
-        if training:
-            data = 'train'
-            return_item_ix = return_item_ix
-        else:
-            data = 'val'
-            return_item_ix = False
+            # Unlabeled samples training
+            strong_feature = model.features(x_strong)
+            strong_logits = model.logits(strong_feature)
 
-        return make_features_dataloader(h5_file_path % data, batch_size, num_workers=args.num_workers, shuffle=shuffle,
-                                        return_item_ix=return_item_ix, in_memory=args.dataset_in_memory)
-    else:
-        raise NotImplementedError('Please implement another dataset.')
+        ul_loss = F.cross_entropy(strong_logits, pseudo, reduction='none') * mask
+        ul_loss = ul_loss.mean()
 
-def compute_accuracies(loader, classifier):
-    probas, y_test_init = classifier.evaluate_(loader)
-    top1, top5 = accuracy(probas, y_test_init, topk=(1, 5))
-    return probas, top1, top5
+        total_loss = l_loss + (args.lambda_u * ul_loss)
 
-def update_accuracies(class_remap, curr_max_class, classifier, accuracies, save_dir, batch_size, shuffle, dataset):
-    seen_classes_test_loader = get_class_data_loader(args, class_remap, False, 0, curr_max_class, batch_size=batch_size,
-                                                     shuffle=shuffle, dataset=dataset, return_item_ix=True)
-    seen_probas, seen_top1, seen_top5 = compute_accuracies(seen_classes_test_loader, classifier)
+        # Compute Gradient and do SGD step
+        optimizer.zero_grad()
+        total_loss.requires_grad_(True)
+        total_loss.backward()
+        optimizer.step()
 
-    print('\nSeen Classes (%d-%d): top1=%0.2f%% -- top5=%0.2f%%' % (0, curr_max_class - 1, seen_top1, seen_top5))
-    accuracies['seen_classes_top1'].append(float(seen_top1))
-    accuracies['seen_classes_top5'].append(float(seen_top5))
+        losses.update(l_loss)
+        losses_ul.update(ul_loss)
+        losses_total.update(total_loss)
 
-    # save accuracies and predictions out
-    save_accuracies(accuracies, min_class_trained=0, max_class_trained=curr_max_class, save_path=save_dir)
-    save_predictions(seen_probas, 0, curr_max_class, save_dir)
+        correct = predicted.eq(y).cpu().sum().item()
+        acc.update(correct, len(y))
 
-def streaming_class_iid_training(args, classifier, class_remap):
-    start_time = time.time()
-    # start list of accuracies
-    accuracies = {'seen_classes_top1': [], 'seen_classes_top5': []}
-    # save_name = "model_weights_min_trained_0_max_trained_%d"
+        sys.stdout.write('\r')
+        sys.stdout.write('%s-%s | Epoch [%3d/%3d] Iter[%3d/%3d]\t Labeled loss: %.2f  Unlabeled loss: %.2f Total Loss: %.4f  Accuracy: %.2f' % (args.dataset, args.mode, epoch+1, args.epoch, batch_idx+1, num_iter, l_loss, ul_loss, total_loss, acc.avg*100))
+        sys.stdout.flush()
 
-    # loop over all data and compute accuracy after every "batch"
-    for curr_class_ix in range(0, args.num_classes, args.class_increment):
-        max_class = min(curr_class_ix + args.class_increment, args.num_classes)
+    if 'NCM' in args.model_name:
+        model.init_ncm(task, epoch+1, args.epoch)
 
-        # get training loader for current batch
-        train_loader = get_class_data_loader(args, class_remap, True, curr_class_ix, max_class,
-                                             batch_size=args.batch_size,
-                                             shuffle=False, dataset=args.dataset, return_item_ix=True)
+    return l_loss.item(), ul_loss.item(), total_loss.item(), acc.avg*100
 
-        # fit model
-        classifier.train_(train_loader)
+def test(task, model, test_loader):
+    acc = AverageMeter()
+    sys.stdout.write('\n')
 
-        if curr_class_ix != 0 and ((curr_class_ix + 1) % args.evaluate_increment == 0):
-            # print("\nEvaluating classes from {} to {}".format(0, max_class))
-            # output accuracies to console and save out to json file
-            update_accuracies(class_remap, max_class, classifier, accuracies, args.save_dir, args.batch_size,
-                              shuffle=False, dataset=args.dataset)
-            # classifier.save_model(save_dir, save_name % max_class)
+    model.eval()
+    with torch.no_grad():
+        for x, y in test_loader:
+            x, y = x.to(args.device), y.to(args.device)
 
-    # print final accuracies and time
-    test_loader = get_class_data_loader(args, class_remap, False, 0, args.num_classes, batch_size=args.batch_size,
-                                        shuffle=False, dataset=args.dataset, return_item_ix=True)
-    probas, y_test = classifier.evaluate_(test_loader)
-    top1, top5 = accuracy(probas, y_test, topk=(1, 5))
-    accuracies['seen_classes_top1'].append(float(top1))
-    accuracies['seen_classes_top5'].append(float(top5))
+            output = model(x, y)
+            _, predicted = torch.max(output, dim=1)
 
-    # save accuracies, predictions, and model out
-    save_accuracies(accuracies, min_class_trained=0, max_class_trained=args.num_classes, save_path=args.save_dir)
-    save_predictions(probas, 0, args.num_classes, args.save_dir)
-    classifier.save_model(args.save_dir, "model_weights_final")
+            correct = predicted.eq(y).cpu().sum().item()
+            acc.update(correct, len(y))
 
-    end_time = time.time()
-    print('\nModel Updates: ', classifier.num_updates)
-    print('\nFinal: top1=%0.2f%% -- top5=%0.2f%%' % (top1, top5))
-    print('\nTotal Time (seconds): %0.2f' % (end_time - start_time))
+            sys.stdout.write('\r')
+            sys.stdout.write("Test | Accuracy (Test Dataset Up to Task-%d): %.2f%%" % (task+1, acc.avg*100))
+            sys.stdout.flush()
 
+    return acc.avg*100
 
-def streaming_iid_training(args, classifier):
-    start_time = time.time()
-    # start list of accuracies
-    accuracies = {'top1': [], 'top5': []}
-    # save_name = "model_weights_%d"
-
-    train_loader = get_iid_data_loader(args, True, batch_size=args.batch_size, shuffle=True, dataset=args.dataset,
-                                       return_item_ix=True)
-    test_loader = get_iid_data_loader(args, False, batch_size=args.batch_size, shuffle=False, dataset=args.dataset,
-                                      return_item_ix=True)
-
-    start = 0
-    for batch_x, batch_y, batch_ix in train_loader:
-        # fit model
-        classifier.fit_batch(batch_x, batch_y, batch_ix)
-
-        end = start + len(batch_x)
-        # TODO: decide if we want to compute performance between batches
-        start = end
-
-    # print final accuracies and time
-    probas, y_test = classifier.evaluate_(test_loader)
-    top1, top5 = accuracy(probas, y_test, topk=(1, 5))
-    accuracies['top1'].append(float(top1))
-    accuracies['top5'].append(float(top5))
-
-    # save accuracies, predictions, and model out
-    save_accuracies(accuracies, min_class_trained=0, max_class_trained=args.num_classes, save_path=args.save_dir)
-    save_predictions(probas, 0, args.num_classes, args.save_dir)
-    classifier.save_model(args.save_dir, "model_weights_final")
-
-    end_time = time.time()
-    print('\nModel Updates: ', classifier.num_updates)
-    print('\nFinal: top1=%0.2f%% -- top5=%0.2f%%' % (top1, top5))
-    print('\nTotal Time (seconds): %0.2f' % (end_time - start_time))
-
-def evaluate(args, classifier):
-    start_time = time.time()
-    # start list of accuracies
-    accuracies = {'top1': [], 'top5': []}
-    # save_name = "model_weights_%d"
-
-    test_loader = get_iid_data_loader(args, False, batch_size=args.batch_size, shuffle=False, dataset=args.dataset,
-                                      return_item_ix=True)
-
-    # print final accuracies and time
-    probas, y_test = classifier.evaluate_(test_loader)
-    top1, top5 = accuracy(probas, y_test, topk=(1, 5))
-    accuracies['top1'].append(float(top1))
-    accuracies['top5'].append(float(top5))
-
-    # save accuracies, predictions, and model out
-    # save_accuracies(accuracies, min_class_trained=0, max_class_trained=args.num_classes, save_path=args.save_dir)
-    # save_predictions(probas, 0, args.num_classes, args.save_dir)
-    # classifier.save_model(args.save_dir, "model_weights_final")
-
-    end_time = time.time()
-    print('\nModel Updates: ', classifier.num_updates)
-    print('\nFinal: top1=%0.2f%% -- top5=%0.2f%%' % (top1, top5))
-    print('\nTotal Time (seconds): %0.2f' % (end_time - start_time))
-
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    # General Settings
-    parser.add_argument('--seed', type=int, default=0)
-    parser.add_argument('--device', type=int, default=0)
-    parser.add_argument('--dataset', type=str, default='cifar10', choices=['mnist', 'cifar10', 'cifar100'])
-
-    # Model Settings
-    parser.add_argument('--arch', type=str, default='resnet18', choices=['resnet18', 'mobilenet_v3_small', 'mobilenet_v3_large'])
-    parser.add_argument('--cl_model', type=str, default='slda', choices=['slda', 'fine_tune', 'replay', 'ncm'])
-    parser.add_argument('--evaluate', type=bool_flag, default=False)
-    parser.add_argument('--data_ordering', default='class_iid', choices=['class_iid', 'iid'])
-    parser.add_argument('--num_classes', type=int, default=10)  # total number of classes in the dataset
-    parser.add_argument('--class_increment', type=int, default=1)
-    parser.add_argument('--batch_size', type=int, default=512)  # batch size for testing
-
-    # SLDA parameters
-    parser.add_argument('--shrinkage', type=float, default=1e-4)  # shrinkage for SLDA/Naive Bayes
-    parser.add_argument('--streaming_update_sigma', type=bool_flag, default=True)  # true to update covariance online
-
-    args = parser.parse_args()
-
-    args.input_feature_size = get_feature_size(args.arch)
-
+def main():
     ## GPU Setup
     torch.cuda.set_device(args.device)
-    # Set Seed
-    cudnn.deterministic = True
-    cudnn.benchmark = False
+
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed_all(args.seed)
+    cudnn.benchmark = True
 
-    # setup continual model
-    print('\nUsing the %s continual learning model.' % args.cl_model)
-    if args.cl_model == 'slda':
-        classifier = SLDA.StreamingLDA(args.input_feature_size, args.num_classes,
-                                  shrinkage_param=args.shrinkage, streaming_update_sigma=args.streaming_update_sigma)
-    elif args.cl_model == 'fine_tune':
-        classifier = StreamSoftmax.StreamingSoftmax(args.input_feature_size, args.num_classes, use_replay=False,
-                                      lr=args.lr, weight_decay=args.wd)
-        if args.ckpt is not None:
-            classifier.load_model(args.ckpt)
-    elif args.cl_model == 'replay': # using this for replay
-        classifier = StreamSoftmax.StreamingSoftmax(args.input_feature_size, args.num_classes, use_replay=True,
-                                      lr=args.lr, weight_decay=args.wd, replay_samples=args.replay_size,
-                                      max_buffer_size=args.buffer_size)
-        if args.ckpt is not None:
-            classifier.load_model(args.ckpt)
-    elif args.cl_model == 'ncm':
-        classifier = NCM.NearestClassMean(args.input_feature_size, args.num_classes)
-        if args.ckpt is not None:
-            classifier.load_model(args.ckpt)
-    else:
-        raise NotImplementedError
+    # Dataset Generator
+    if 'CIFAR' in args.dataset:
+        data_generator.__dict__['CIFAR_Generator'](args)
+    root = os.path.join(args.root, args.dataset)
 
-    if args.evaluate:
-        evaluate(args, classifier)
+    # Create Model
+    model_name = args.model_name
+    if 'NCM' in model_name:
+        model = resnet.__dict__[args.model_name](args.num_class, device=args.device)
     else:
-        if args.data_ordering == 'class_iid':
-            # get class ordering
-            class_remap = remap_classes(args.num_classes, args.seed) # shuffle class idx
-            streaming_class_iid_training(args, classifier, class_remap)
-        elif args.data_ordering == 'iid':
-            streaming_iid_training(args, classifier)
-        else:
-            raise NotImplementedError
+        model = resnet.__dict__[args.model_name](args.num_class)
+    model.to(args.device)
+
+    criterion = nn.CrossEntropyLoss()
+
+    # Optimizer and Scheduler
+    optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, weight_decay=5e-4)
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10, eta_min=2e-4)
+
+    # For plotting the logs
+    sscl_logger = SSCL_logger('logs/' + args.dataset + '/sscl_logs_' + args.device_name + '_')
+
+    sscl_logger.config(config=args)
+
+    if args.dataset == 'CIFAR10':
+        task_mode_list = ['Task-1', 'Task-2', 'Task-3', 'Task-4', 'Task-5']
+    elif args.dataset == 'CIFAR100':
+        task_mode_list = ['Task-1', 'Task-2', 'Task-3', 'Task-4', 'Task-5', 'Task-6', 'Task-7', 'Task-8', 'Task-9', 'Task-10', 'Task-11', 'Task-12', 'Task-13', 'Task-14', 'Task-15', 'Task-16', 'Task-17', 'Task-18', 'Task-19', 'Task-20']
+    
+    data_loader = dataloader.dataloader(args)
+    
+    avg_test_acc = AverageMeter()
+
+    for t, task_mode in enumerate(task_mode_list):
+        labeled_trainloader, unlabeled_trainloader = data_loader.load(t)
+        test_loader = data_loader.load(t, train=False)
+
+        label_file = root + '/Train/Labeled/' + args.dataset + '_Labels_Task' + str(t) + '_' + args.mode + '.npy'
+        train_label = np.squeeze(np.load(label_file))
+        class_name  = np.unique(train_label)
+        num_samples = np.shape(train_label)[0]
+
+        print('\n', task_mode)
+        print("Number of Samples:", num_samples, class_name)
+
+        weight = torch.zeros(args.num_class)
+        weight[class_name] = 1
+        weight = weight.cuda()
+        criterion = nn.CrossEntropyLoss(weight = weight)
+
+        best_acc = 0
+        for epoch in range(args.epoch):
+            l_loss, ul_loss, total_loss, train_acc = train(epoch, t, model, labeled_trainloader, unlabeled_trainloader, criterion, optimizer)
+
+            if train_acc > best_acc:
+                best_acc = train_acc
+                sscl_logger.result('SSCL Train Epoch Loss/Labeled', l_loss, epoch)
+                sscl_logger.result('SSCL Train Epoch Loss/Unlabeled', ul_loss, epoch)
+                sscl_logger.result('SSCL Train Epoch Loss/Total', total_loss, epoch)
+
+        sscl_logger.result('SSCL Train Accuracy', best_acc, t+1)
+
+        test_acc = test(t, model, test_loader)
+        avg_test_acc.update(test_acc)
+        sscl_logger.result('SSCL Test Accuracy', test_acc, t+1)
+
+        scheduler.step()
+
+    sscl_logger.result('SSCL Average Test Accuracy', avg_test_acc.avg, 1)
+    # the average test accuracy over all tasks
+    print("\n\nAverage Test Accuracy : %.2f%%" % avg_test_acc.avg)
+
+
+if __name__ == '__main__':
+    main()

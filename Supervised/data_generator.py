@@ -10,10 +10,9 @@ class CIFAR10(datasets.CIFAR10):
     name = 'CIFAR10'
     num_classes = 10
 
-    def __init__(self, args, train=True, semi=False, lab=True):
+    def __init__(self, args, train=True):
         self.split_data = []
         self.split_target = []
-        self.mode = args.mode
         self.root = os.path.join(args.root, args.dataset)
 
         transform = transforms.Compose([transforms.Resize((args.image_size, args.image_size)),
@@ -21,48 +20,20 @@ class CIFAR10(datasets.CIFAR10):
 
         datasets.CIFAR10.__init__(self, root=self.root, train=train, transform=transform, download=True)
 
-        if self.mode == 'super':
-            self.super_data = []
-            self.super_target = []
-
-            super_classes = [["truck", "automobile"],
-                             ["bird", "airplane"],
-                             ["cat", "dog"],
-                             ["frog", "ship"],
-                             ["deer", "horse"]]
-
-            for t, super_cls in enumerate(super_classes):
-                cls_idx = [self.class_to_idx[c] for c in super_cls]
-                
-                for y in cls_idx:
-                    sup_classes = torch.nonzero(torch.Tensor(self.targets) == y)
-        else:
-
-            for y in range(self.num_classes):
-                cls_idx = torch.nonzero(torch.Tensor(self.targets) == y)
-                
-                if train and semi:
-                    split_point = int(len(cls_idx)*args.label_ratio)
-
-                    if lab: cls_idx = cls_idx[:split_point]
-                    else: cls_idx = cls_idx[split_point:]
-
-                self.split_data = [self.data[loc] for loc in cls_idx]
-                self.split_target = [self.targets[loc] for loc in cls_idx]
-
         if train:
             save_path = self.root + '/Train'
-            if not os.path.exists(save_path): os.mkdir(save_path)
-            if lab: save_path = save_path + '/Labeled'
-            else: save_path = save_path + '/Unlabeled'
             if not os.path.exists(save_path): os.mkdir(save_path)
         else:
             save_path = self.root + '/Test'
             if not os.path.exists(save_path): os.mkdir(save_path)
+
+        for y in range(self.num_classes):
+            cls_idx = torch.nonzero(torch.Tensor(self.targets) == y)
+            self.split_data = [self.data[loc] for loc in cls_idx]
+            self.split_target = [self.targets[loc] for loc in cls_idx]
         
-        t = str(y) + '_'
-        np.save(os.path.join(save_path, args.dataset + '_Images_Task' + t + args.mode), np.array(self.split_data))
-        np.save(os.path.join(save_path, args.dataset + '_Labels_Task' + t + args.mode), np.array(self.split_target))
+            np.save(os.path.join(save_path, args.dataset + '_Images_Class' + str(y)), np.array(self.split_data))
+            np.save(os.path.join(save_path, args.dataset + '_Labels_Class' + str(y)), np.array(self.split_target))
 
     def __getitem__(self, index):
         x, y = self.split_data[index], self.split_target[index]
@@ -162,10 +133,8 @@ def CIFAR_Generator(args):
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
 
-    DATASET[args.dataset](args, semi=True)
-    print('Train Labeled Dataset Save Done!')
-    DATASET[args.dataset](args, semi=True, lab=False)
-    print('Train Unlabeled Dataset Save Done!')
+    DATASET[args.dataset](args)
+    print('Train Dataset Save Done!')
     DATASET[args.dataset](args, train=False)
     print('Test Dataset Save Done!')
 

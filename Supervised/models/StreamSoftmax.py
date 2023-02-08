@@ -5,7 +5,7 @@ import random
 import numpy as np
 import os
 
-from utils import randint, CMA
+from Temp.utils import randint, CMA
 
 
 class SoftmaxLayer(torch.nn.Module):
@@ -182,19 +182,21 @@ class StreamingSoftmax(nn.Module):
         for x, y, item_ix in zip(batch_x, batch_y, batch_ix):
             self.fit(x, y.view(1, ), item_ix)
 
-    def train_(self, train_loader):
+    def train_(self, data_loader, task):
         # print('\nTraining on %d images.' % len(train_loader.dataset))
+        train_loader = data_loader.load(task)
 
-        for batch_x, batch_y, batch_ix in train_loader:
+        for batch_x, batch_y in train_loader:
             if self.backbone is not None:
                 batch_x_feat = self.backbone(batch_x.to(self.device))
             else:
                 batch_x_feat = batch_x.to(self.device)
 
-            self.fit_batch(batch_x_feat, batch_y, batch_ix)
+            self.fit_batch(batch_x_feat, batch_y, task)
 
     @torch.no_grad()
-    def evaluate_(self, test_loader):
+    def evaluate_(self, data_loader, task):
+        test_loader = data_loader.load(task)
         print('\nTesting on %d images.' % len(test_loader.dataset))
 
         num_samples = len(test_loader.dataset)
