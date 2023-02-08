@@ -29,21 +29,29 @@ class dataset(Dataset):
         self.transform = get_transform(args.dataset)
 
         if self.train:
-            # load train data & label
-            image_file = self.root + '/Train/' + args.dataset + '_Images_Class' + str(task) + '.npy'
-            labeled_file = self.root + '/Train/' + args.dataset + '_Labels_Class' + str(task) + '.npy'
+            self.train_x = []
+            self.train_y = []
 
-            train_x = np.squeeze(np.load(image_file))
-            train_y = np.squeeze(np.load(labeled_file))
-            self.train_x = train_x
-            self.train_y = train_y
+            for task_idx in task:
+            # load train data & label
+                image_file = self.root + '/Train/' + args.dataset + '_Images_Class' + str(task_idx) + '.npy'
+                labeled_file = self.root + '/Train/' + args.dataset + '_Labels_Class' + str(task_idx) + '.npy'
+
+                train_x = np.squeeze(np.load(image_file))
+                train_y = np.squeeze(np.load(labeled_file))
+                self.train_x.extend(train_x)
+                self.train_y.extend(train_y)
+
+            self.train_x = np.array(train_x)
+            self.train_y = np.array(train_y)
 
         else:
             # load test data & label
             self.test_x = []
             self.test_y = []
+            max_task = int(max(task)) + 1
 
-            for task_idx in range(task+1):
+            for task_idx in range(max_task):
                 test_image_file = self.root + '/Test/' + args.dataset + '_Images_Class' + str(task_idx) + '.npy'
                 test_label_file = self.root + '/Test/' + args.dataset + '_Labels_Class' + str(task_idx) + '.npy'
 
