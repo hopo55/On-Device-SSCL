@@ -11,8 +11,25 @@ import torch
 import torch.backends.cudnn as cudnn
 
 
-def get_iid_data_loader(args, training, batch_size=128, shuffle=False, dataset='places', return_item_ix=False):
-    if dataset == 'places' or dataset == 'imagenet' or dataset == 'places_lt':
+def get_class_data_loader(args, class_remap, training, min_class, max_class, batch_size=128, shuffle=False,
+                          dataset='places', return_item_ix=False):
+    if dataset == 'mnist' or dataset == 'cifar10' or dataset == 'cifar100':
+        h5_file_path = os.path.join(args.h5_features_dir, '%s_features.h5')
+        if training:
+            data = 'train'
+            return_item_ix = return_item_ix
+        else:
+            data = 'val'
+            return_item_ix = False
+        return make_incremental_features_dataloader(class_remap, h5_file_path % data, min_class, max_class,
+                                                    batch_size=batch_size, shuffle=shuffle,
+                                                    return_item_ix=return_item_ix, num_workers=args.num_workers,
+                                                    in_memory=args.dataset_in_memory)
+    else:
+        raise NotImplementedError('Please implement another dataset.')
+
+def get_iid_data_loader(args, training, batch_size=128, shuffle=False, dataset='cifar10', return_item_ix=False):
+    if dataset == 'mnist' or dataset == 'cifar10' or dataset == 'cifar100':
         h5_file_path = os.path.join(args.h5_features_dir, '%s_features.h5')
         if training:
             data = 'train'
@@ -25,6 +42,24 @@ def get_iid_data_loader(args, training, batch_size=128, shuffle=False, dataset='
                                         return_item_ix=return_item_ix, in_memory=args.dataset_in_memory)
     else:
         raise NotImplementedError('Please implement another dataset.')
+
+def compute_accuracies(loader, classifier):
+    probas, y_test_init = classifier.evaluate_(loader)
+    top1, top5 = accuracy(probas, y_test_init, topk=(1, 5))
+    return probas, top1, top5
+
+def update_accuracies(class_remap, curr_max_class, classifier, accuracies, save_dir, batch_size, shuffle, dataset):
+    seen_classes_test_loader = get_class_data_loader(args, class_remap, False, 0, curr_max_class, batch_size=batch_size,
+                                                     shuffle=shuffle, dataset=dataset, return_item_ix=True)
+    seen_probas, seen_top1, seen_top5 = compute_accuracies(seen_classes_test_loader, classifier)
+
+    print('\nSeen Classes (%d-%d): top1=%0.2f%% -- top5=%0.2f%%' % (0, curr_max_class - 1, seen_top1, seen_top5))
+    accuracies['seen_classes_top1'].append(float(seen_top1))
+    accuracies['seen_classes_top5'].append(float(seen_top5))
+
+    # save accuracies and predictions out
+    save_accuracies(accuracies, min_class_trained=0, max_class_trained=curr_max_class, save_path=save_dir)
+    save_predictions(seen_probas, 0, curr_max_class, save_dir)
 
 def streaming_class_iid_training(args, classifier, class_remap):
     start_time = time.time()
@@ -136,11 +171,20 @@ if __name__ == '__main__':
     # General Settings
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--device', type=int, default=0)
+    parser.add_argument('--dataset', type=str, default='cifar10', choices=['mnist', 'cifar10', 'cifar100'])
+
     # Model Settings
-    parser.add_argument('--arch', type=str, choices=['resnet18', 'mobilenet_v3_small', 'mobilenet_v3_large'])
+    parser.add_argument('--arch', type=str, default='resnet18', choices=['resnet18', 'mobilenet_v3_small', 'mobilenet_v3_large'])
     parser.add_argument('--cl_model', type=str, default='slda', choices=['slda', 'fine_tune', 'replay', 'ncm'])
     parser.add_argument('--evaluate', type=bool_flag, default=False)
     parser.add_argument('--data_ordering', default='class_iid', choices=['class_iid', 'iid'])
+    parser.add_argument('--num_classes', type=int, default=10)  # total number of classes in the dataset
+    parser.add_argument('--class_increment', type=int, default=1)
+    parser.add_argument('--batch_size', type=int, default=512)  # batch size for testing
+
+    # SLDA parameters
+    parser.add_argument('--shrinkage', type=float, default=1e-4)  # shrinkage for SLDA/Naive Bayes
+    parser.add_argument('--streaming_update_sigma', type=bool_flag, default=True)  # true to update covariance online
 
     args = parser.parse_args()
 
@@ -184,7 +228,7 @@ if __name__ == '__main__':
     else:
         if args.data_ordering == 'class_iid':
             # get class ordering
-            class_remap = remap_classes(args.num_classes, args.permutation_seed)
+            class_remap = remap_classes(args.num_classes, args.seed) # shuffle class idx
             streaming_class_iid_training(args, classifier, class_remap)
         elif args.data_ordering == 'iid':
             streaming_iid_training(args, classifier)
