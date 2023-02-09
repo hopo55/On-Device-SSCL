@@ -27,6 +27,7 @@ parser.add_argument('--image_size', type=int, default=32)
 parser.add_argument('--batch_size', type=int, default=512)
 parser.add_argument('--test_size', type=int, default=256)
 parser.add_argument('--num_workers', type=int, default=0)
+parser.add_argument('--mode', type=str, default='vanilla', choices=['vanilla', 'super'])
 # Model Settings
 parser.add_argument('--model_name', type=str, default='ResNet18', choices=['ResNet18', 'Reduced_ResNet18', 'mobilenet_v3_small', 'mobilenet_v3_large'])
 parser.add_argument('--classifier', type=str, default='FC', choices=['FC', 'NCM', 'SLDA'])
@@ -36,7 +37,7 @@ parser.add_argument('--num_classes', type=int, default=10)
 parser.add_argument('--buffer_size', type=int, default=500, help="size of buffer for replay")
 # CL Settings
 parser.add_argument('--cl_mode', type=str, default='Fine-tune', choices=['Fine-tune', 'SLDA', 'NCM', 'Replay'])
-parser.add_argument('--class_increment', type=int, default=5)
+parser.add_argument('--class_increment', type=int, default=1)
 # NCM Settings
 
 args = parser.parse_args()
@@ -109,6 +110,9 @@ def main():
     # Dataset Generator
     if 'CIFAR' in args.dataset:
         data_generator.__dict__['CIFAR_Generator'](args)
+        if args.dataset == 'CIFAR10': args.num_classes = 10
+        else: args.num_classes = 100
+
     root = os.path.join(args.root, args.dataset)
 
     # Create Model
