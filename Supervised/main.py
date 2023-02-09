@@ -24,17 +24,19 @@ parser.add_argument('--device_name', type=str, default='cal_05')
 parser.add_argument('--root', type=str, default='./data/')
 parser.add_argument('--dataset', default='CIFAR10', choices=['MNIST', 'CIFAR10', 'CIFAR100'])
 parser.add_argument('--image_size', type=int, default=32)
-parser.add_argument('--batch_size', type=int, default=128)
-parser.add_argument('--test_size', type=int, default=64)
+parser.add_argument('--batch_size', type=int, default=512)
+parser.add_argument('--test_size', type=int, default=256)
 parser.add_argument('--num_workers', type=int, default=0)
 # Model Settings
 parser.add_argument('--model_name', type=str, default='ResNet18', choices=['ResNet18', 'Reduced_ResNet18', 'mobilenet_v3_small', 'mobilenet_v3_large'])
-parser.add_argument('--classifier', type=str, default='NCM', choices=['NCM, SLDA, FC'])
+parser.add_argument('--classifier', type=str, default='FC', choices=['FC', 'NCM', 'SLDA'])
 parser.add_argument('--epoch', type=int, default=10)
 parser.add_argument('--lr', '--learning_rate', type=float, default=0.1)
 parser.add_argument('--num_classes', type=int, default=10)
-parser.add_argument('--buffer_size', type=int, default=1000, help="size of buffer for replay")
-parser.add_argument('--class_increment', type=int, default=1)
+parser.add_argument('--buffer_size', type=int, default=500, help="size of buffer for replay")
+# CL Settings
+parser.add_argument('--cl_mode', type=str, default='Fine-tune', choices=['Fine-tune', 'SLDA', 'NCM', 'Replay'])
+parser.add_argument('--class_increment', type=int, default=5)
 # NCM Settings
 
 args = parser.parse_args()
@@ -51,7 +53,7 @@ def train(epoch, model, train_loader, criterion, optimizer):
         x, y = x.to(args.device), y.to(args.device)
 
         # Labeled samples training
-        logits = model(x, y)
+        logits = model(x)
         loss = criterion(logits, y)
         _, predicted = torch.max(logits, dim=1)
 
@@ -81,7 +83,7 @@ def test(task, model, test_loader):
         for x, y in test_loader:
             x, y = x.to(args.device), y.to(args.device)
 
-            output = model(x, y)
+            output = model(x)
             _, predicted = torch.max(output, dim=1)
 
             correct = predicted.eq(y).cpu().sum().item()
@@ -123,33 +125,23 @@ def main():
     optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, weight_decay=5e-4)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10, eta_min=2e-4)
 
+    criterion = nn.CrossEntropyLoss()
+
     # For plotting the logs
-    logger = SSCL_logger('logs/' + args.dataset + '/sscl_logs_' + args.device_name + '_')
+    logger = SSCL_logger('logs/' + args.dataset + '/' + args.device_name, args.cl_mode)
 
     logger.config(config=args)
-
-    # if args.dataset == 'CIFAR10':
-    #     task_mode_list = ['Task-1', 'Task-2', 'Task-3', 'Task-4', 'Task-5']
-    # elif args.dataset == 'CIFAR100':
-    #     task_mode_list = ['Task-1', 'Task-2', 'Task-3', 'Task-4', 'Task-5', 'Task-6', 'Task-7', 'Task-8', 'Task-9', 'Task-10', 'Task-11', 'Task-12', 'Task-13', 'Task-14', 'Task-15', 'Task-16', 'Task-17', 'Task-18', 'Task-19', 'Task-20']
+    log_t = 1
     
     data_loader = dataloader.dataloader(args)
     avg_test_acc = AverageMeter()
 
     for idx in range(0, args.num_classes, args.class_increment):
         task = [k for k in range(idx, idx+args.class_increment)]
+        print('\nTask : ', task)
 
         train_loader = data_loader.load(task)
         test_loader = data_loader.load(task, train=False)
-
-        label_file = root + '/Train/' + args.dataset + '_Labels_Class' + str(idx) + '.npy'
-        train_label = np.squeeze(np.load(label_file))
-        class_name  = np.unique(train_label)
-
-        weight = torch.zeros(args.num_classes)
-        weight[class_name] = 1
-        weight = weight.cuda()
-        criterion = nn.CrossEntropyLoss(weight = weight)
 
         best_acc = 0
         for epoch in range(args.epoch):
@@ -159,13 +151,14 @@ def main():
                 best_acc = train_acc
                 logger.result('SSCL Train Epoch Loss/Labeled', loss, epoch)
 
-        logger.result('SSCL Train Accuracy', best_acc, t+1)
+        logger.result('SSCL Train Accuracy', best_acc, log_t)
 
         test_acc = test(idx, model, test_loader)
         avg_test_acc.update(test_acc)
-        logger.result('SSCL Test Accuracy', test_acc, t+1)
+        logger.result('SSCL Test Accuracy', test_acc, log_t)
 
         scheduler.step()
+        log_t += 1
 
     logger.result('SSCL Average Test Accuracy', avg_test_acc.avg, 1)
     # the average test accuracy over all tasks

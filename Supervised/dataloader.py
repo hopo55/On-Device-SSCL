@@ -33,7 +33,7 @@ class dataset(Dataset):
             self.train_y = []
 
             for task_idx in task:
-            # load train data & label
+                # load train data & label
                 image_file = self.root + '/Train/' + args.dataset + '_Images_Class' + str(task_idx) + '.npy'
                 labeled_file = self.root + '/Train/' + args.dataset + '_Labels_Class' + str(task_idx) + '.npy'
 
@@ -42,8 +42,8 @@ class dataset(Dataset):
                 self.train_x.extend(train_x)
                 self.train_y.extend(train_y)
 
-            self.train_x = np.array(train_x)
-            self.train_y = np.array(train_y)
+            self.train_x = np.array(self.train_x)
+            self.train_y = np.array(self.train_y)
 
         else:
             # load test data & label

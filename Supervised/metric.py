@@ -33,12 +33,15 @@ def _make_path_if_local(tb_log_dir: Union[str, Path]) -> Union[str, Path]:
     return tb_log_dir
 
 class SSCL_logger():
-    def __init__(self, path):
+    def __init__(self, path, method):
         self.path = path
         date = dt.datetime.now()
         date = date.strftime("%Y_%m_%d_%H_%M_%S")
-        tb_log_dir = self.path + date
 
+        tb_log_dir = _make_path_if_local(self.path)
+        tb_log_dir = self.path + '/' + method
+        tb_log_dir = _make_path_if_local(tb_log_dir)
+        tb_log_dir = self.path + '/' + method + '/' + date
         tb_log_dir = _make_path_if_local(tb_log_dir)
         self.logger = SummaryWriter(tb_log_dir)
 
