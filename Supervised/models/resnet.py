@@ -82,7 +82,7 @@ class ResNet(nn.Module):
         self.layer2 = self._make_layer(block, nf * 2, num_blocks[1], stride=2)
         self.layer3 = self._make_layer(block, nf * 4, num_blocks[2], stride=2)
         self.layer4 = self._make_layer(block, nf * 8, num_blocks[3], stride=2)
-        self.last = nn.Linear(self.feature_size, self.num_classes, bias=bias)
+        self.classifier = nn.Linear(self.feature_size, self.num_classes, bias=bias)
 
     def _make_layer(self, block, planes, num_blocks, stride):
         strides = [stride] + [1] * (num_blocks - 1)
@@ -105,7 +105,7 @@ class ResNet(nn.Module):
 
     def logits(self, x):
         '''Apply the last FC linear mapping to get logits'''
-        x = self.last(x)
+        x = self.classifier(x)
         return x
 
     def forward(self, x):

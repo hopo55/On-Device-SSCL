@@ -48,9 +48,8 @@ class SSCL_logger():
     def result(self, title, log_data, n_iter):
         self.logger.add_scalar(title, log_data, n_iter)
 
-    def config(self, config):
+    def config(self, config, metric_dict):
         config = vars(config)
-        metric_dict = {'loss':0, 'metric':0}
         self.logger.add_hparams(config, metric_dict, run_name=None)
 
 __all__ = ['AverageMeter', 'SSCL_logger']

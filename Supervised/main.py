@@ -12,7 +12,7 @@ import torch.backends.cudnn as cudnn
 
 import dataloader
 import data_generator
-from models import resnet
+from models import resnet, NCM, DeepNCM, SLDA
 from metric import AverageMeter, SSCL_logger
 
 parser = argparse.ArgumentParser()
@@ -22,7 +22,7 @@ parser.add_argument('--device', type=int, default=0)
 parser.add_argument('--device_name', type=str, default='cal_05')
 # Dataset Settings
 parser.add_argument('--root', type=str, default='./data/')
-parser.add_argument('--dataset', default='CIFAR10', choices=['MNIST', 'CIFAR10', 'CIFAR100'])
+parser.add_argument('--dataset', default='CIFAR10', choices=['MNIST', 'CIFAR10', 'CIFAR100', 'HAR'])
 parser.add_argument('--image_size', type=int, default=32)
 parser.add_argument('--batch_size', type=int, default=512)
 parser.add_argument('--test_size', type=int, default=256)
@@ -30,19 +30,18 @@ parser.add_argument('--num_workers', type=int, default=0)
 parser.add_argument('--mode', type=str, default='vanilla', choices=['vanilla', 'super'])
 # Model Settings
 parser.add_argument('--model_name', type=str, default='ResNet18', choices=['ResNet18', 'Reduced_ResNet18', 'mobilenet_v3_small', 'mobilenet_v3_large'])
-parser.add_argument('--classifier', type=str, default='FC', choices=['FC', 'NCM', 'SLDA'])
 parser.add_argument('--epoch', type=int, default=10)
 parser.add_argument('--lr', '--learning_rate', type=float, default=0.1)
 parser.add_argument('--num_classes', type=int, default=10)
 parser.add_argument('--buffer_size', type=int, default=500, help="size of buffer for replay")
 # CL Settings
-parser.add_argument('--cl_mode', type=str, default='Fine-tune', choices=['Fine-tune', 'SLDA', 'NCM', 'Replay'])
+parser.add_argument('--cl_mode', type=str, default='Fine-tune', choices=['Fine-tune', 'SLDA', 'NCM', 'DeepNCM', 'Replay'])
 parser.add_argument('--class_increment', type=int, default=1)
 # NCM Settings
 
 args = parser.parse_args()
 
-def train(epoch, model, train_loader, criterion, optimizer):
+def train(epoch, model, train_loader, criterion, optimizer, classifier=None):
     model.train()
 
     acc = AverageMeter()
@@ -51,10 +50,14 @@ def train(epoch, model, train_loader, criterion, optimizer):
     num_iter = math.ceil(len(train_loader.dataset) / args.batch_size)
 
     for batch_idx, (x, y) in enumerate(train_loader):
+        y = y.type(torch.LongTensor)
         x, y = x.to(args.device), y.to(args.device)
 
-        # Labeled samples training
-        logits = model(x)
+        if classifier is None:
+            logits = model(x)
+        else:
+            pass
+
         loss = criterion(logits, y)
         _, predicted = torch.max(logits, dim=1)
 
@@ -113,17 +116,21 @@ def main():
         if args.dataset == 'CIFAR10': args.num_classes = 10
         else: args.num_classes = 100
 
-    root = os.path.join(args.root, args.dataset)
-
     # Create Model
     model_name = args.model_name
     if 'ResNet' in model_name:
         model = resnet.__dict__[args.model_name](args.num_classes)
     model.to(args.device)
 
-    classifier_name = args.classifier
+    classifier_name = args.cl_mode
     if classifier_name == 'NCM':
-        pass
+        classifier = NCM.NearestClassMean()
+    elif classifier_name == 'DeepNCM':
+        classifier = DeepNCM.DeepNearestClassMean()
+    elif classifier_name == 'SLDA':
+        classifier = SLDA.StreamingLDA()
+    else:
+        classifier = None
 
     # Optimizer and Scheduler
     optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, weight_decay=5e-4)
@@ -133,8 +140,6 @@ def main():
 
     # For plotting the logs
     logger = SSCL_logger('logs/' + args.dataset + '/' + args.device_name, args.cl_mode)
-
-    logger.config(config=args)
     log_t = 1
     
     data_loader = dataloader.dataloader(args)
@@ -149,7 +154,7 @@ def main():
 
         best_acc = 0
         for epoch in range(args.epoch):
-            loss, train_acc = train(epoch, model, train_loader, criterion, optimizer)
+            loss, train_acc = train(epoch, model, train_loader, criterion, optimizer, classifier)
 
             if train_acc > best_acc:
                 best_acc = train_acc
@@ -167,6 +172,9 @@ def main():
     logger.result('SSCL Average Test Accuracy', avg_test_acc.avg, 1)
     # the average test accuracy over all tasks
     print("\n\nAverage Test Accuracy : %.2f%%" % avg_test_acc.avg)
+
+    metric_dict = {'metric': avg_test_acc.avg}
+    logger.config(config=args, metric_dict=metric_dict)
 
 
 if __name__ == '__main__':
