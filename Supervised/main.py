@@ -8,12 +8,14 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torchvision.models as models
 import torch.backends.cudnn as cudnn
 
 import dataloader
 import data_generator
 from models import resnet, NCM, DeepNCM, SLDA
 from metric import AverageMeter, SSCL_logger
+from utils import get_feature_size
 
 parser = argparse.ArgumentParser()
 # General Settings
@@ -29,17 +31,19 @@ parser.add_argument('--test_size', type=int, default=256)
 parser.add_argument('--num_workers', type=int, default=0)
 parser.add_argument('--mode', type=str, default='vanilla', choices=['vanilla', 'super'])
 # Model Settings
-parser.add_argument('--model_name', type=str, default='ResNet18', choices=['ResNet18', 'Reduced_ResNet18', 'mobilenet_v3_small', 'mobilenet_v3_large'])
+parser.add_argument('--model_name', type=str, default='ResNet18', choices=['ResNet18', 'ImageNet_ResNet', 'mobilenet_v3_small', 'mobilenet_v3_large'])
+parser.add_argument("--pre_trained", default=False, action='store_true')
 parser.add_argument('--epoch', type=int, default=10)
 parser.add_argument('--lr', '--learning_rate', type=float, default=0.1)
 parser.add_argument('--num_classes', type=int, default=10)
 parser.add_argument('--buffer_size', type=int, default=500, help="size of buffer for replay")
 # CL Settings
-parser.add_argument('--cl_mode', type=str, default='Fine-tune', choices=['Fine-tune', 'SLDA', 'NCM', 'DeepNCM', 'Replay'])
+parser.add_argument('--cl_mode', type=str, default='FC', choices=['FC', 'SLDA', 'NCM', 'DeepNCM', 'Replay'])
 parser.add_argument('--class_increment', type=int, default=1)
 # NCM Settings
 
 args = parser.parse_args()
+
 
 def train(epoch, model, train_loader, criterion, optimizer, classifier=None):
     model.train()
@@ -55,8 +59,12 @@ def train(epoch, model, train_loader, criterion, optimizer, classifier=None):
 
         if classifier is None:
             logits = model(x)
+        elif args.cl_mode == 'NCM' or args.cl_mode == 'SLDA':
+            feature = model(x)
+            classifier
         else:
-            pass
+            feature = model(x)
+            logits = classifier(feature)
 
         loss = criterion(logits, y)
         _, predicted = torch.max(logits, dim=1)
@@ -118,9 +126,13 @@ def main():
 
     # Create Model
     model_name = args.model_name
-    if 'ResNet' in model_name:
+    if args.pre_trained:
+            model = resnet.__dict__[args.model_name](device=args.device)
+    elif 'ResNet' in model_name:
         model = resnet.__dict__[args.model_name](args.num_classes)
     model.to(args.device)
+
+    feature_size = get_feature_size(model_name)
 
     classifier_name = args.cl_mode
     if classifier_name == 'NCM':
@@ -129,8 +141,10 @@ def main():
         classifier = DeepNCM.DeepNearestClassMean()
     elif classifier_name == 'SLDA':
         classifier = SLDA.StreamingLDA()
+    elif classifier_name == 'FC' and args.pre_trained:  
+        classifier = nn.Linear(feature_size, args.num_classes, bias=True) # fine-tuning
     else:
-        classifier = None
+        classifier = None # full training
 
     # Optimizer and Scheduler
     optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, weight_decay=5e-4)
@@ -143,7 +157,7 @@ def main():
     log_t = 1
     
     data_loader = dataloader.dataloader(args)
-    avg_test_acc = AverageMeter()
+    last_test_acc = 0
 
     for idx in range(0, args.num_classes, args.class_increment):
         task = [k for k in range(idx, idx+args.class_increment)]
@@ -163,17 +177,17 @@ def main():
         logger.result('SSCL Train Accuracy', best_acc, log_t)
 
         test_acc = test(idx, model, test_loader)
-        avg_test_acc.update(test_acc)
         logger.result('SSCL Test Accuracy', test_acc, log_t)
+        last_test_acc = test_acc
 
         scheduler.step()
         log_t += 1
 
-    logger.result('SSCL Average Test Accuracy', avg_test_acc.avg, 1)
+    logger.result('Final Test Accuracy', last_test_acc, 1)
     # the average test accuracy over all tasks
-    print("\n\nAverage Test Accuracy : %.2f%%" % avg_test_acc.avg)
+    print("\n\nAverage Test Accuracy : %.2f%%" % last_test_acc)
 
-    metric_dict = {'metric': avg_test_acc.avg}
+    metric_dict = {'metric': last_test_acc}
     logger.config(config=args, metric_dict=metric_dict)
 
 

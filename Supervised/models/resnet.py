@@ -7,10 +7,9 @@ Supervised Contrastive Replay: Revisiting the Nearest Class Mean Classifier
 in Online Class-Incremental Continual Learning
                   https://github.com/RaptorMai/online-continual-learning
 """
-import os
 import torch
-import torch.nn.functional as F
 import torch.nn as nn
+import torchvision.models as models
 from torch.nn.functional import relu, avg_pool2d
 
 def conv3x3(in_planes, out_planes, stride=1):
@@ -113,7 +112,90 @@ class ResNet(nn.Module):
         logits = self.logits(out)
 
         return logits
- 
+
+class FeatureExtractorBackbone(nn.Module):
+    """
+    This PyTorch module allows us to extract features from a backbone network
+    given a layer name.
+    """
+
+    def __init__(self, model, output_layer_name):
+        super(FeatureExtractorBackbone, self).__init__()
+        self.model = model
+        self.output_layer_name = output_layer_name
+        self.output = None  # this will store the layer output
+        self.add_hooks(self.model)
+
+    def forward(self, x):
+        self.model(x)
+        return self.output
+
+    def get_name_to_module(self, model):
+        name_to_module = {}
+        for m in model.named_modules():
+            name_to_module[m[0]] = m[1]
+        return name_to_module
+
+    def get_activation(self):
+        def hook(model, input, output):
+            self.output = output.detach()
+
+        return hook
+
+    def add_hooks(self, model):
+        """
+        :param model:
+        :param outputs: Outputs from layers specified in `output_layer_names`
+        will be stored in `output` variable
+        :param output_layer_names:
+        :return:
+        """
+        name_to_module = self.get_name_to_module(model)
+        name_to_module[self.output_layer_name].register_forward_hook(
+            self.get_activation()
+        ) 
+
+class ImageNet_ResNet(nn.Module):
+    """
+    This is a model wrapper to reproduce experiments from the original
+    paper of Deep Streaming Linear Discriminant Analysis by using
+    a pretrained ResNet model.
+    """
+
+    def __init__(self, arch="resnet18", output_layer_name="layer4.1", imagenet_pretrained=True, device="cpu"):
+        """Init.
+        :param arch: backbone architecture. Default is resnet-18, but others
+            can be used by modifying layer for
+            feature extraction in ``self.feature_extraction_wrapper``.
+        :param imagenet_pretrained: True if initializing backbone with imagenet
+            pre-trained weights else False
+        :param output_layer_name: name of the layer from feature extractor
+        :param device: cpu, gpu or other device
+        """
+        super(ImageNet_ResNet, self).__init__()
+
+        feat_extractor = (models.__dict__[arch](pretrained=imagenet_pretrained).to(device).eval())
+        self.feature_extraction_wrapper = FeatureExtractorBackbone(feat_extractor, output_layer_name).eval()
+
+    @staticmethod
+    def pool_feat(features):
+        feat_size = features.shape[-1]
+        num_channels = features.shape[1]
+        features2 = features.permute(0, 2, 3, 1)  # 1 x feat_size x feat_size x
+        # num_channels
+        features3 = torch.reshape(
+            features2, (features.shape[0], feat_size * feat_size, num_channels)
+        )
+        feat = features3.mean(1)  # mb x num_channels
+        return feat
+
+    def forward(self, x):
+        """
+        :param x: raw x data
+        """
+        feat = self.feature_extraction_wrapper(x)
+        feat = ImageNet_ResNet.pool_feat(feat)
+        return feat
 
 '''
 See https://github.com/kuangliu/pytorch-cifar/blob/master/models/resnet.py
