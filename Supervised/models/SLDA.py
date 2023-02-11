@@ -8,8 +8,7 @@ class StreamingLDA(nn.Module):
     Analysis algorithm for streaming learning.
     """
 
-    def __init__(self, input_shape, num_classes, backbone=None, shrinkage_param=1e-4, streaming_update_sigma=True,
-                 ood_type='mahalanobis', device='cuda'):
+    def __init__(self, input_shape, num_classes, backbone=None, shrinkage_param=1e-4, streaming_update_sigma=True, ood_type='mahalanobis', device='cuda'):
         """
         Init function for the SLDA model.
         :param input_shape: feature dimension
@@ -113,9 +112,9 @@ class StreamingLDA(nn.Module):
 
         # return predictions or probabilities
         if not return_probas:
-            return scores.cpu()
+            return scores
         else:
-            return torch.softmax(scores, dim=1).cpu()
+            return torch.softmax(scores, dim=1)
 
     @torch.no_grad()
     def ood_predict(self, x):
@@ -169,42 +168,25 @@ class StreamingLDA(nn.Module):
         return scores, labels
 
     @torch.no_grad()
-    def fit_batch(self, batch_x, batch_y, batch_ix):
+    def fit_batch(self, batch_x, batch_y):
         # fit SLDA one example at a time
         for x, y in zip(batch_x, batch_y):
             self.fit(x.cpu(), y.view(1, ), None)
 
     @torch.no_grad()
-    def train_(self, train_loader):
-        # print('\nTraining on %d images.' % len(train_loader.dataset))
+    def train_(self, feature, target):
+        if self.backbone is not None:
+            batch_x_feat = self.backbone(feature.to(self.device))
+        else:
+            batch_x_feat = feature.to(self.device)
 
-        for batch_x, batch_y, batch_ix in train_loader:
-            if self.backbone is not None:
-                batch_x_feat = self.backbone(batch_x.to(self.device))
-            else:
-                batch_x_feat = batch_x.to(self.device)
-
-            self.fit_batch(batch_x_feat, batch_y, batch_ix)
+        self.fit_batch(batch_x_feat, target)
 
     @torch.no_grad()
-    def evaluate_(self, test_loader):
-        print('\nTesting on %d images.' % len(test_loader.dataset))
+    def evaluate_(self, feature):
+        probas = self.predict(feature, return_probas=True)
 
-        num_samples = len(test_loader.dataset)
-        probabilities = torch.empty((num_samples, self.num_classes))
-        labels = torch.empty(num_samples).long()
-        start = 0
-        for test_x, test_y in test_loader:
-            if self.backbone is not None:
-                batch_x_feat = self.backbone(test_x.to(self.device))
-            else:
-                batch_x_feat = test_x.to(self.device)
-            probas = self.predict(batch_x_feat, return_probas=True)
-            end = start + probas.shape[0]
-            probabilities[start:end] = probas
-            labels[start:end] = test_y.squeeze()
-            start = end
-        return probabilities, labels
+        return probas
 
     def save_model(self, save_path, save_name):
         """

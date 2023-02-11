@@ -5,7 +5,7 @@ import random
 import numpy as np
 import os
 
-from Temp.utils import randint, CMA
+from utils import randint, CMA
 
 
 class SoftmaxLayer(torch.nn.Module):

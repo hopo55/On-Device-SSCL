@@ -8,12 +8,11 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import torchvision.models as models
 import torch.backends.cudnn as cudnn
 
 import dataloader
 import data_generator
-from models import resnet, NCM, DeepNCM, SLDA
+from models import resnet, NCM, DeepNCM, SLDA, Softmax
 from metric import AverageMeter, SSCL_logger
 from utils import get_feature_size
 
@@ -38,7 +37,7 @@ parser.add_argument('--lr', '--learning_rate', type=float, default=0.1)
 parser.add_argument('--num_classes', type=int, default=10)
 parser.add_argument('--buffer_size', type=int, default=500, help="size of buffer for replay")
 # CL Settings
-parser.add_argument('--cl_mode', type=str, default='FC', choices=['FC', 'SLDA', 'NCM', 'DeepNCM', 'Replay'])
+parser.add_argument('--cl_mode', type=str, default='FC', choices=['FC', 'Fine-tuning', 'SLDA', 'NCM', 'DeepNCM', 'Replay'])
 parser.add_argument('--class_increment', type=int, default=1)
 # NCM Settings
 
@@ -57,36 +56,51 @@ def train(epoch, model, train_loader, criterion, optimizer, classifier=None):
         y = y.type(torch.LongTensor)
         x, y = x.to(args.device), y.to(args.device)
 
-        if classifier is None:
-            logits = model(x)
+        if classifier is None and args.pre_trained is False:
+            logits = model(x) # FC
+        
         elif args.cl_mode == 'NCM' or args.cl_mode == 'SLDA':
             feature = model(x)
-            classifier
+            classifier.train_(feature, y)
+        
+        elif args.cl_mode == 'DeepNCM':
+            feature = model.forward(x)
+            logits = model.predict(feature)
+
+            model.update_means(feature, y)
+        
         else:
-            feature = model(x)
+            classifier.to(args.device) # Fine-tuning
+            classifier.train()
+
+            feature = model(x) # Fine-tuning using FC
             logits = classifier(feature)
 
-        loss = criterion(logits, y)
-        _, predicted = torch.max(logits, dim=1)
+        if args.cl_mode != 'NCM' and args.cl_mode != 'SLDA':
+            loss = criterion(logits, y)
+            _, predicted = torch.max(logits, dim=1)
 
-        # Compute Gradient and do SGD step
-        optimizer.zero_grad()
-        loss.requires_grad_(True)
-        loss.backward()
-        optimizer.step()
+            # Compute Gradient and do SGD step
+            optimizer.zero_grad()
+            loss.requires_grad_(True)
+            loss.backward()
+            optimizer.step()
 
-        losses.update(loss)
+            losses.update(loss)
 
-        correct = predicted.eq(y).cpu().sum().item()
-        acc.update(correct, len(y))
+            correct = predicted.eq(y).cpu().sum().item()
+            acc.update(correct, len(y))
 
-        sys.stdout.write('\r')
-        sys.stdout.write('%s | Epoch [%3d/%3d] Iter[%3d/%3d]\t loss: %.2f Accuracy: %.2f' % (args.dataset, epoch+1, args.epoch, batch_idx+1, num_iter, loss, acc.avg*100))
-        sys.stdout.flush()
+            sys.stdout.write('\r')
+            sys.stdout.write('%s | Epoch [%3d/%3d] Iter[%3d/%3d]\t loss: %.2f Accuracy: %.2f' % (args.dataset, epoch+1, args.epoch, batch_idx+1, num_iter, loss, acc.avg*100))
+            sys.stdout.flush()
 
-    return loss.item(), acc.avg*100
+    if args.cl_mode == 'NCM' or args.cl_mode == 'SLDA':
+        return 0, 0
+    else:
+        return loss.item(), acc.avg*100
 
-def test(task, model, test_loader):
+def test(task, model, test_loader, classifier=None):
     acc = AverageMeter()
     sys.stdout.write('\n')
 
@@ -95,7 +109,20 @@ def test(task, model, test_loader):
         for x, y in test_loader:
             x, y = x.to(args.device), y.to(args.device)
 
-            output = model(x)
+            if classifier is None and args.pre_trained is False:
+                output = model(x) # FC
+
+            elif args.cl_mode == 'NCM' or args.cl_mode == 'SLDA':
+                feature = model(x)
+                output = classifier.evaluate_(feature)
+                
+            else:
+                classifier.to(args.device) # Fine-tuning
+                classifier.eval()
+
+                feature = model(x) # Fine-tuning using FC
+                output = classifier(feature)
+
             _, predicted = torch.max(output, dim=1)
 
             correct = predicted.eq(y).cpu().sum().item()
@@ -127,30 +154,33 @@ def main():
     # Create Model
     model_name = args.model_name
     if args.pre_trained:
-            model = resnet.__dict__[args.model_name](device=args.device)
+        model = resnet.__dict__[args.model_name](device=args.device)
     elif 'ResNet' in model_name:
         model = resnet.__dict__[args.model_name](args.num_classes)
     model.to(args.device)
 
-    feature_size = get_feature_size(model_name)
-
-    classifier_name = args.cl_mode
-    if classifier_name == 'NCM':
-        classifier = NCM.NearestClassMean()
-    elif classifier_name == 'DeepNCM':
-        classifier = DeepNCM.DeepNearestClassMean()
-    elif classifier_name == 'SLDA':
-        classifier = SLDA.StreamingLDA()
-    elif classifier_name == 'FC' and args.pre_trained:  
-        classifier = nn.Linear(feature_size, args.num_classes, bias=True) # fine-tuning
-    else:
-        classifier = None # full training
-
     # Optimizer and Scheduler
     optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, weight_decay=5e-4)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10, eta_min=2e-4)
-
     criterion = nn.CrossEntropyLoss()
+
+    feature_size = get_feature_size(model_name)
+
+    # Select Classifier
+    classifier_name = args.cl_mode
+    if classifier_name == 'NCM':
+        classifier = NCM.NearestClassMean(feature_size, args.num_classes, device=args.device)
+    elif classifier_name == 'DeepNCM':
+        model = resnet.ResNet18_NCM(args.num_classes)
+        model.to(args.device)
+    elif classifier_name == 'SLDA':
+        classifier = SLDA.StreamingLDA(feature_size, args.num_classes, device=args.device)
+    elif classifier_name == 'Fine-tuning' and args.pre_trained:  
+        classifier = Softmax.SoftmaxLayer(feature_size, args.num_classes) # fine-tuning
+        optimizer = optim.SGD(classifier.parameters(), lr=args.lr, momentum=0.9, weight_decay=5e-4)
+        scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10, eta_min=2e-4)
+    else:
+        classifier = None # full training
 
     # For plotting the logs
     logger = SSCL_logger('logs/' + args.dataset + '/' + args.device_name, args.cl_mode)
@@ -176,11 +206,12 @@ def main():
 
         logger.result('SSCL Train Accuracy', best_acc, log_t)
 
-        test_acc = test(idx, model, test_loader)
+        test_acc = test(idx, model, test_loader, classifier)
         logger.result('SSCL Test Accuracy', test_acc, log_t)
         last_test_acc = test_acc
 
-        scheduler.step()
+        if args.cl_mode != 'NCM' and args.cl_mode != 'SLDA':
+            scheduler.step()
         log_t += 1
 
     logger.result('Final Test Accuracy', last_test_acc, 1)

@@ -89,9 +89,9 @@ class NearestClassMean(nn.Module):
 
         # return predictions or probabilities
         if not return_probas:
-            return scores.cpu()
+            return scores
         else:
-            return torch.softmax(scores, dim=1).cpu()
+            return torch.softmax(scores, dim=1)
 
     @torch.no_grad()
     def ood_predict(self, x):
@@ -125,39 +125,19 @@ class NearestClassMean(nn.Module):
             self.fit(x.cpu(), y.view(1, ), None)
 
     @torch.no_grad()
-    def train_(self, data_loader, task):
-        # print('\nTraining on %d images.' % len(train_loader.dataset))
-        train_loader = data_loader.load(task)
+    def train_(self, feature, target):
+        if self.backbone is not None:
+            batch_x_feat = self.backbone(feature.to(self.device))
+        else:
+            batch_x_feat = feature.to(self.device)
 
-        for batch_x, batch_y in train_loader:
-            if self.backbone is not None:
-                batch_x_feat = self.backbone(batch_x.to(self.device))
-            else:
-                batch_x_feat = batch_x.to(self.device)
-
-            self.fit_batch(batch_x_feat, batch_y)
+        self.fit_batch(batch_x_feat, target)
 
     @torch.no_grad()
-    def evaluate_(self, data_loader, task):
-        test_loader = data_loader.load(task)
+    def evaluate_(self, feature):
+        probas = self.predict(feature, return_probas=True)
 
-        print('\nTesting on %d images.' % len(test_loader.dataset))
-
-        num_samples = len(test_loader.dataset)
-        probabilities = torch.empty((num_samples, self.num_classes))
-        labels = torch.empty(num_samples).long()
-        start = 0
-        for test_x, test_y in test_loader:
-            if self.backbone is not None:
-                batch_x_feat = self.backbone(test_x.to(self.device))
-            else:
-                batch_x_feat = test_x.to(self.device)
-            probas = self.predict(batch_x_feat, return_probas=True)
-            end = start + probas.shape[0]
-            probabilities[start:end] = probas
-            labels[start:end] = test_y.squeeze()
-            start = end
-        return probabilities, labels
+        return probas
 
     def save_model(self, save_path, save_name):
         """
