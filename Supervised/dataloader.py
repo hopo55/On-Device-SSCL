@@ -1,6 +1,8 @@
 import os
 import numpy as np
 from PIL import Image
+
+import torch
 import torchvision.transforms as transforms
 from torch.utils.data import Dataset, DataLoader
 
@@ -14,19 +16,24 @@ dataset_stats = {
 }
 
 def get_transform(dataset_name='CIFAR100'):
-    transform = transforms.Compose(
-        [
-            transforms.ToTensor(),
-            transforms.Normalize(dataset_stats[dataset_name]['mean'], dataset_stats[dataset_name]['std']),
-        ]
-    )
+    if 'CIFAR' in dataset_name:
+        transform = transforms.Compose(
+            [
+                transforms.ToTensor(),
+                transforms.Normalize(dataset_stats[dataset_name]['mean'], dataset_stats[dataset_name]['std']),
+            ]
+        )
+    elif 'HAR' in dataset_name:
+        transform = transforms.Compose([transforms.ToTensor()])
+
     return transform
 
 class dataset(Dataset):
     def __init__(self, args, task, train=True):
-        self.root = os.path.join(args.root, args.dataset)
+        self.args = args
         self.train = train
         self.transform = get_transform(args.dataset)
+        self.root = os.path.join(args.root, args.dataset)
 
         if self.train:
             self.train_x = []
@@ -34,8 +41,8 @@ class dataset(Dataset):
 
             for task_idx in task:
                 # load train data & label
-                image_file = self.root + '/Train/' + args.dataset + '_Images_Class' + str(task_idx) + '.npy'
-                labeled_file = self.root + '/Train/' + args.dataset + '_Labels_Class' + str(task_idx) + '.npy'
+                image_file = self.root + '/train/' + args.dataset + '_Class' + str(task_idx) + '.npy'
+                labeled_file = self.root + '/train/' + args.dataset + '_Labels' + str(task_idx) + '.npy'
 
                 train_x = np.squeeze(np.load(image_file))
                 train_y = np.squeeze(np.load(labeled_file))
@@ -52,8 +59,8 @@ class dataset(Dataset):
             max_task = int(max(task)) + 1
 
             for task_idx in range(max_task):
-                test_image_file = self.root + '/Test/' + args.dataset + '_Images_Class' + str(task_idx) + '.npy'
-                test_label_file = self.root + '/Test/' + args.dataset + '_Labels_Class' + str(task_idx) + '.npy'
+                test_image_file = self.root + '/test/' + args.dataset + '_Class' + str(task_idx) + '.npy'
+                test_label_file = self.root + '/test/' + args.dataset + '_Labels' + str(task_idx) + '.npy'
 
                 test_x = np.squeeze(np.load(test_image_file))
                 test_y = np.squeeze(np.load(test_label_file))
@@ -70,18 +77,26 @@ class dataset(Dataset):
             return len(self.test_x)
 
     def __getitem__(self, index):
-        if self.train:
-            img, target = 255*self.train_x[index], self.train_y[index]
-            img = img.astype(np.uint8)
-            img = Image.fromarray(img)
-            img = self.transform(img)
-            return img, target
-        else:
-            img, target = 255*self.test_x[index], self.test_y[index]
-            img = img.astype(np.uint8)
-            img = Image.fromarray(img)
-            img = self.transform(img)            
-            return img, target
+        if 'CIFAR' in self.args.dataset:
+            if self.train:
+                img, target = 255*self.train_x[index], self.train_y[index]
+                img = img.astype(np.uint8)
+                img = Image.fromarray(img)
+                img = self.transform(img)
+                return img, target
+            else:
+                img, target = 255*self.test_x[index], self.test_y[index]
+                img = img.astype(np.uint8)
+                img = Image.fromarray(img)
+                img = self.transform(img)            
+                return img, target
+        elif 'HAR' in self.args.dataset:
+            if self.train:
+                data = torch.as_tensor(self.train_x[index])
+                return data, self.train_y[index]
+            else:
+                data = torch.as_tensor(self.test_x[index])
+                return data, self.test_y[index]
 
 
 class dataloader():
@@ -100,10 +115,3 @@ class dataloader():
             test_loader = DataLoader(test_dataset, batch_size=self.args.test_size, shuffle=False, num_workers=self.args.num_workers)
 
             return test_loader
-
-# HAR Dataset
-
-class har_dataset(Dataset):
-     def __init__(self, args, task, train=True):
-        self.root = os.path.join(args.root, args.dataset)
-        self.train = train

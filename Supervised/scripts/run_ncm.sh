@@ -3,7 +3,7 @@
 SEED=0
 DEVICE=0
 DEVICE_NAME='hspark'
-DATASET='CIFAR100'
+DATASET='CIFAR10'
 MODEL='ImageNet_ResNet' # If use pre-trained model
 EPOCH=1
 BATCH_SIZE=512

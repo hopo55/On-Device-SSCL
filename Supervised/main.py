@@ -30,7 +30,7 @@ parser.add_argument('--test_size', type=int, default=256)
 parser.add_argument('--num_workers', type=int, default=0)
 parser.add_argument('--mode', type=str, default='vanilla', choices=['vanilla', 'super'])
 # Model Settings
-parser.add_argument('--model_name', type=str, default='ResNet18', choices=['ResNet18', 'ImageNet_ResNet', 'mobilenet_v3_small', 'mobilenet_v3_large'])
+parser.add_argument('--model_name', type=str, default='ResNet18', choices=['ResNet18', 'ResNet18_HAR', 'ImageNet_ResNet', 'mobilenet_v3_small', 'mobilenet_v3_large'])
 parser.add_argument("--pre_trained", default=False, action='store_true')
 parser.add_argument('--epoch', type=int, default=10)
 parser.add_argument('--lr', '--learning_rate', type=float, default=0.1)
@@ -54,7 +54,7 @@ def train(epoch, model, train_loader, criterion, optimizer, classifier=None):
 
     for batch_idx, (x, y) in enumerate(train_loader):
         y = y.type(torch.LongTensor)
-        x, y = x.to(args.device), y.to(args.device)
+        x, y = x.to(args.device).float(), y.to(args.device)
 
         if classifier is None and args.pre_trained is False:
             logits = model(x) # FC
@@ -109,7 +109,7 @@ def test(task, model, test_loader, classifier=None):
     model.eval()
     with torch.no_grad():
         for x, y in test_loader:
-            x, y = x.to(args.device), y.to(args.device)
+            x, y = x.to(args.device).float(), y.to(args.device)
 
             if classifier is None and args.pre_trained is False:
                 output = model(x) # FC
@@ -149,9 +149,12 @@ def main():
 
     # Dataset Generator
     if 'CIFAR' in args.dataset:
-        data_generator.__dict__['CIFAR_Generator'](args)
+        data_generator.__dict__['Generator'](args)
         if args.dataset == 'CIFAR10': args.num_classes = 10
         else: args.num_classes = 100
+    elif 'HAR' in args.dataset:
+        data_generator.__dict__['Generator'](args)
+        if args.dataset == 'HAR': args.num_classes = 6
 
     # Create Model
     model_name = args.model_name
@@ -159,6 +162,9 @@ def main():
         model = resnet.__dict__[args.model_name](device=args.device)
     elif 'ResNet' in model_name:
         model = resnet.__dict__[args.model_name](args.num_classes)
+        if args.dataset == 'HAR':
+            model.input_channel = 6
+
     model.to(args.device)
 
     # Optimizer and Scheduler
