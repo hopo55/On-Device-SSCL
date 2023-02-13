@@ -73,9 +73,20 @@ class CIFAR100(datasets.CIFAR100):
         
         return x, y
 
+class HAR():
+    name = 'HAR'
+    num_classes = 6
+
+    def __init__(self, args, train=True):
+        self.root = os.path.join(args.root, args.dataset)
+
+        if train:
+            save_path = self.root + '/Train'
+
 DATASET = {
     CIFAR10.name: CIFAR10,
-    CIFAR100.name: CIFAR100
+    CIFAR100.name: CIFAR100,
+    HAR.name: HAR
 }
 
 def CIFAR_Generator(args):

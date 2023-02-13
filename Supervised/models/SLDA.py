@@ -63,17 +63,15 @@ class StreamingLDA(nn.Module):
             x_minus_mu = (x - self.muK[y])
             mult = torch.matmul(x_minus_mu.transpose(1, 0), x_minus_mu)
             delta = mult * self.num_updates / (self.num_updates + 1)
-            self.Sigma = (self.num_updates * self.Sigma + delta) / (
-                    self.num_updates + 1)
+            self.Sigma = (self.num_updates * self.Sigma + delta) / (self.num_updates + 1)
 
         # update class means
-        self.muK[y, :] += (x - self.muK[y, :]) / (self.cK[y] + 1).unsqueeze(
-            1)
+        self.muK[y, :] += (x - self.muK[y, :]) / (self.cK[y] + 1).unsqueeze(1)
         self.cK[y] += 1
         self.num_updates += 1
 
     @torch.no_grad()
-    def predict(self, X, return_probas=False):
+    def predict(self, X):
         """
         Make predictions on test data X.
         :param X: a torch tensor that contains N data samples (N x d)
@@ -87,85 +85,22 @@ class StreamingLDA(nn.Module):
         if self.prev_num_updates != self.num_updates:
             # there have been updates to the model, compute Lambda
             Lambda = torch.pinverse(
-                (
-                        1 - self.shrinkage_param) * self.Sigma +
-                self.shrinkage_param * torch.eye(
-                    self.input_shape).to(
-                    self.device))
+                (1 - self.shrinkage_param) * self.Sigma
+                + self.shrinkage_param 
+                * torch.eye(self.input_shape).to(self.device)
+            )
             self.Lambda = Lambda
             self.prev_num_updates = self.num_updates
-        else:
-            Lambda = self.Lambda
 
         # parameters for predictions
         M = self.muK.transpose(1, 0)
-        W = torch.matmul(Lambda, M)
+        W = torch.matmul(self.Lambda, M)
         c = 0.5 * torch.sum(M * W, dim=0)
 
         # loop in mini-batches over test samples
         scores = torch.matmul(X, W) - c
 
-        not_visited_ix = torch.where(self.cK == 0)[0]
-        min_col = torch.min(scores, dim=1)[0].unsqueeze(0) - 1
-        scores[:, not_visited_ix] = min_col.tile(len(not_visited_ix)).reshape(
-            len(not_visited_ix), len(X)).transpose(1, 0)  # mask off scores for unseen classes
-
-        # return predictions or probabilities
-        if not return_probas:
-            return scores
-        else:
-            return torch.softmax(scores, dim=1)
-
-    @torch.no_grad()
-    def ood_predict(self, x):
-        def pd_mat(input1, input2, precision):  # assumes diagonal precision (kxd)
-            f1 = (input1[:, None] - input2)
-            f2 = f1.matmul(precision[None, :, :])
-            return 0.5 * torch.diagonal(f2.matmul(f1.transpose(2, 1)), dim1=1, dim2=2)
-
-        # compute/load Lambda matrix
-        if self.prev_num_updates != self.num_updates:
-            # there have been updates to the model, compute Lambda
-            invC = torch.pinverse(
-                (
-                        1 - self.shrinkage_param) * self.Sigma +
-                self.shrinkage_param * torch.eye(
-                    self.input_shape).to(
-                    self.device))
-            self.Lambda = invC
-            self.prev_num_updates = self.num_updates
-        else:
-            invC = self.Lambda
-
-        if self.ood_type == 'mahalanobis':
-            scores = -pd_mat(x, self.posW, invC)
-        elif self.ood_type == 'baseline':
-            scores = self.predict(x, return_probas=True)
-        else:
-            raise NotImplementedError
-
         return scores
-
-    @torch.no_grad()
-    def evaluate_ood_(self, test_loader):
-        print('\nTesting OOD on %d images.' % len(test_loader.dataset))
-
-        num_samples = len(test_loader.dataset)
-        scores = torch.empty((num_samples, self.num_classes))
-        labels = torch.empty(num_samples).long()
-        start = 0
-        for test_x, test_y in test_loader:
-            if self.backbone is not None:
-                batch_x_feat = self.backbone(test_x.to(self.device))
-            else:
-                batch_x_feat = test_x.to(self.device)
-            ood_scores = self.ood_predict(batch_x_feat)
-            end = start + ood_scores.shape[0]
-            scores[start:end] = ood_scores
-            labels[start:end] = test_y.squeeze()
-            start = end
-
-        return scores, labels
 
     @torch.no_grad()
     def fit_batch(self, batch_x, batch_y):
@@ -184,7 +119,7 @@ class StreamingLDA(nn.Module):
 
     @torch.no_grad()
     def evaluate_(self, feature):
-        probas = self.predict(feature, return_probas=True)
+        probas = self.predict(feature)
 
         return probas
 

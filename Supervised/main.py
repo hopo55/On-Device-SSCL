@@ -60,6 +60,7 @@ def train(epoch, model, train_loader, criterion, optimizer, classifier=None):
             logits = model(x) # FC
         
         elif args.cl_mode == 'NCM' or args.cl_mode == 'SLDA':
+            model.eval()
             feature = model(x)
             classifier.train_(feature, y)
         
@@ -70,6 +71,7 @@ def train(epoch, model, train_loader, criterion, optimizer, classifier=None):
             model.update_means(feature, y)
         
         else:
+            model.eval()
             classifier.to(args.device) # Fine-tuning
             classifier.train()
 

@@ -100,3 +100,10 @@ class dataloader():
             test_loader = DataLoader(test_dataset, batch_size=self.args.test_size, shuffle=False, num_workers=self.args.num_workers)
 
             return test_loader
+
+# HAR Dataset
+
+class har_dataset(Dataset):
+     def __init__(self, args, task, train=True):
+        self.root = os.path.join(args.root, args.dataset)
+        self.train = train
