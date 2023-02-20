@@ -30,7 +30,7 @@ parser.add_argument('--test_size', type=int, default=256)
 parser.add_argument('--num_workers', type=int, default=0)
 parser.add_argument('--mode', type=str, default='vanilla', choices=['vanilla', 'super'])
 # Model Settings
-parser.add_argument('--model_name', type=str, default='ResNet18', choices=['ResNet18', 'ResNet18_HAR', 'ImageNet_ResNet', 'mobilenet_v3_small', 'mobilenet_v3_large'])
+parser.add_argument('--model_name', type=str, default='ResNet18', choices=['ResNet18', 'ResNet18_HAR', 'ResNet18_DeepNCM', 'ImageNet_ResNet', 'mobilenet_v3_small', 'mobilenet_v3_large'])
 parser.add_argument("--pre_trained", default=False, action='store_true')
 parser.add_argument('--epoch', type=int, default=10)
 parser.add_argument('--lr', '--learning_rate', type=float, default=0.1)
@@ -56,7 +56,7 @@ def train(epoch, model, train_loader, criterion, optimizer, classifier=None):
         y = y.type(torch.LongTensor)
         x, y = x.to(args.device).float(), y.to(args.device)
 
-        if classifier is None and args.pre_trained is False:
+        if classifier is None and args.pre_trained is False and args.cl_mode == 'FC':
             logits = model(x) # FC
         
         elif args.cl_mode == 'NCM' or args.cl_mode == 'SLDA':
@@ -65,7 +65,7 @@ def train(epoch, model, train_loader, criterion, optimizer, classifier=None):
             classifier.train_(feature, y)
         
         elif args.cl_mode == 'DeepNCM':
-            feature = model.forward(x)
+            feature = model(x)
             logits = model.predict(feature)
 
             model.update_means(feature, y)
@@ -111,12 +111,16 @@ def test(task, model, test_loader, classifier=None):
         for x, y in test_loader:
             x, y = x.to(args.device).float(), y.to(args.device)
 
-            if classifier is None and args.pre_trained is False:
+            if classifier is None and args.pre_trained is False and args.cl_mode == 'FC':
                 output = model(x) # FC
 
             elif args.cl_mode == 'NCM' or args.cl_mode == 'SLDA':
                 feature = model(x)
                 output = classifier.evaluate_(feature)
+
+            elif args.cl_mode == 'DeepNCM':
+                feature = model(x)
+                output = model.predict(feature)
                 
             else:
                 classifier.to(args.device) # Fine-tuning
@@ -168,7 +172,8 @@ def main():
     model.to(args.device)
 
     # Optimizer and Scheduler
-    optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, weight_decay=5e-4)
+    optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, weight_decay=2e-4)
+    # scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[100, 150, 200], gamma=0.5)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10, eta_min=2e-4)
     criterion = nn.CrossEntropyLoss()
 
@@ -179,13 +184,16 @@ def main():
     if classifier_name == 'NCM':
         classifier = NCM.NearestClassMean(feature_size, args.num_classes, device=args.device)
     elif classifier_name == 'DeepNCM':
-        model = resnet.ResNet18_NCM(args.num_classes)
+        model = resnet.ResNet18_DeepNCM(args.num_classes)
         model.to(args.device)
+        optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, weight_decay=2e-4)
+        classifier = None
     elif classifier_name == 'SLDA':
         classifier = SLDA.StreamingLDA(feature_size, args.num_classes, device=args.device)
     elif classifier_name == 'Fine-tuning' and args.pre_trained:  
         classifier = Softmax.SoftmaxLayer(feature_size, args.num_classes) # fine-tuning
         optimizer = optim.SGD(classifier.parameters(), lr=args.lr, momentum=0.9, weight_decay=5e-4)
+        # scheduler = optim.lr_scheduler.MultiStepLR(optimizer, setp_size=[100, 150, 200], gamma=0.5)
         scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10, eta_min=2e-4)
     else:
         classifier = None # full training

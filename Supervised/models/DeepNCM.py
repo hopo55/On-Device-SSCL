@@ -44,9 +44,9 @@ class DeepNearestClassMean(nn.Module):
 	
 
 	# Perform the update following the mean decay procedure
+	# Decay Mean / Eq.5
 	def update(self):
 		self.means.data=self.alpha*self.means.data+(1-self.alpha)*self.running_means
-
 
 
 	# Compute mean by filtering the data of the same label

@@ -15,14 +15,24 @@ dataset_stats = {
                  'size' : 32}
 }
 
-def get_transform(dataset_name='CIFAR100'):
+def get_transform(dataset_name='CIFAR100', train=True):
     if 'CIFAR' in dataset_name:
-        transform = transforms.Compose(
-            [
-                transforms.ToTensor(),
-                transforms.Normalize(dataset_stats[dataset_name]['mean'], dataset_stats[dataset_name]['std']),
-            ]
-        )
+        if train:
+            transform = transforms.Compose(
+                [
+                    transforms.RandomCrop(32, padding=4),
+                    transforms.RandomHorizontalFlip(),
+                    transforms.ToTensor(),
+                    transforms.Normalize(dataset_stats[dataset_name]['mean'], dataset_stats[dataset_name]['std']),
+                ]
+            )
+        else:
+            transform = transforms.Compose(
+                [
+                    transforms.ToTensor(),
+                    transforms.Normalize(dataset_stats[dataset_name]['mean'], dataset_stats[dataset_name]['std']),
+                ]
+            )
     elif 'HAR' in dataset_name:
         transform = transforms.Compose([transforms.ToTensor()])
 
@@ -32,7 +42,7 @@ class dataset(Dataset):
     def __init__(self, args, task, train=True):
         self.args = args
         self.train = train
-        self.transform = get_transform(args.dataset)
+        self.transform = get_transform(args.dataset, self.train)
         self.root = os.path.join(args.root, args.dataset)
 
         if self.train:

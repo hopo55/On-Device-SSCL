@@ -325,7 +325,7 @@ class ResNet_NCM(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, x):
-        out = F.relu(self.bn1(self.conv1(x)))
+        out = relu(self.bn1(self.conv1(x)))
         out = self.layer1(out)
         out = self.layer2(out)
         out = self.layer3(out)
@@ -340,7 +340,6 @@ class ResNet_NCM(nn.Module):
     def predict(self, x):
         out = self.linear(x)
         return out
-
 
 
 '''
@@ -366,7 +365,7 @@ def ResNet152(out_dim=10, nf=64, bias=True):
     return ResNet(Bottleneck, [3, 8, 36, 3], out_dim, nf, bias)
 
 # ResNet-NCM
-def ResNet18_NCM(out_dim=10):
+def ResNet18_DeepNCM(out_dim=10):
     return ResNet_NCM(BasicBlock, [2,2,2,2], out_dim)
 
 # ResNet-HAR
