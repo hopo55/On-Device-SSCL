@@ -304,20 +304,24 @@ class ImageNet_ResNet(nn.Module):
 
 
 class ResNet_NCM(nn.Module):
-    def __init__(self, block, num_blocks, num_classes=10):
+    def __init__(self, block, num_blocks, num_classes, nf, bias):
         super(ResNet_NCM, self).__init__()
-        self.in_planes = 64
+        self.in_planes = nf
+        self.num_classes = 0
+        self.feature_size = nf * 8 * block.expansion
+        self.input_channel = 3
 
-        self.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
-        self.bn1 = nn.BatchNorm2d(64)
-        self.layer1 = self._make_layer(block, 64, num_blocks[0], stride=1)
-        self.layer2 = self._make_layer(block, 128, num_blocks[1], stride=2)
-        self.layer3 = self._make_layer(block, 256, num_blocks[2], stride=2)
-        self.layer4 = self._make_layer(block, 512, num_blocks[3], stride=2)
-        self.linear = DeepNCM.DeepNearestClassMean(512*block.expansion, num_classes)
+        self.conv1 = conv3x3(self.input_channel, nf * 1)
+        self.bn1 = nn.BatchNorm2d(nf * 1)
+
+        self.layer1 = self._make_layer(block, nf * 1, num_blocks[0], stride=1)
+        self.layer2 = self._make_layer(block, nf * 2, num_blocks[1], stride=2)
+        self.layer3 = self._make_layer(block, nf * 4, num_blocks[2], stride=2)
+        self.layer4 = self._make_layer(block, nf * 8, num_blocks[3], stride=2)
+        self.linear = DeepNCM.DeepNearestClassMean(512*block.expansion, 0)
 
     def _make_layer(self, block, planes, num_blocks, stride):
-        strides = [stride] + [1]*(num_blocks-1)
+        strides = [stride] + [1] * (num_blocks - 1)
         layers = []
         for stride in strides:
             layers.append(block(self.in_planes, planes, stride))
@@ -325,6 +329,7 @@ class ResNet_NCM(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, x):
+        '''Features before FC layers'''
         out = relu(self.bn1(self.conv1(x)))
         out = self.layer1(out)
         out = self.layer2(out)
@@ -334,13 +339,15 @@ class ResNet_NCM(nn.Module):
         out = out.view(out.size(0), -1)
         return out
 
-    def update_means(self, x,y):
-        self.linear.update_means(x,y)
+    def update_means(self, x, y):
+        self.linear.update_means(x, y)
 
     def predict(self, x):
         out = self.linear(x)
         return out
 
+    def prepare(self,y):
+	    self.linear.init_from_labels(y)
 
 '''
 See https://github.com/kuangliu/pytorch-cifar/blob/master/models/resnet.py
@@ -365,8 +372,8 @@ def ResNet152(out_dim=10, nf=64, bias=True):
     return ResNet(Bottleneck, [3, 8, 36, 3], out_dim, nf, bias)
 
 # ResNet-NCM
-def ResNet18_DeepNCM(out_dim=10):
-    return ResNet_NCM(BasicBlock, [2,2,2,2], out_dim)
+def ResNet18_DeepNCM(out_dim=10, nf=64, bias=True):
+    return ResNet_NCM(BasicBlock, [2, 2, 2, 2], out_dim, nf, bias)
 
 # ResNet-HAR
 def ResNet18_HAR(out_dim=10, nf=64, bias=True):

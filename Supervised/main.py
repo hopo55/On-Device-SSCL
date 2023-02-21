@@ -65,10 +65,14 @@ def train(epoch, model, train_loader, criterion, optimizer, classifier=None):
             classifier.train_(feature, y)
         
         elif args.cl_mode == 'DeepNCM':
+            # Initialize classifier (if novel classes are present)
+            model.prepare(y)
             feature = model(x)
             logits = model.predict(feature)
 
             model.update_means(feature, y)
+            # Convert labels to match the order seen by the classifier
+            y_converted = model.linear.convert_labels(y).to(args.device)
         
         else:
             model.eval()
@@ -79,7 +83,9 @@ def train(epoch, model, train_loader, criterion, optimizer, classifier=None):
             logits = classifier(feature)
 
         if args.cl_mode != 'NCM' and args.cl_mode != 'SLDA':
-            loss = criterion(logits, y)
+            if args.cl_mode == 'DeepNCM': loss = criterion(logits, y_converted)
+            else: loss = criterion(logits, y)
+
             _, predicted = torch.max(logits, dim=1)
 
             # Compute Gradient and do SGD step
@@ -90,7 +96,8 @@ def train(epoch, model, train_loader, criterion, optimizer, classifier=None):
 
             losses.update(loss)
 
-            correct = predicted.eq(y).cpu().sum().item()
+            if args.cl_mode == 'DeepNCM': correct = predicted.eq(y_converted).cpu().sum().item()
+            else: correct = predicted.eq(y).cpu().sum().item()
             acc.update(correct, len(y))
 
             sys.stdout.write('\r')
@@ -121,7 +128,8 @@ def test(task, model, test_loader, classifier=None):
             elif args.cl_mode == 'DeepNCM':
                 feature = model(x)
                 output = model.predict(feature)
-                
+                # Convert labels to match the order seen by the classifier
+                y_converted = model.linear.convert_labels(y).to(args.device)
             else:
                 classifier.to(args.device) # Fine-tuning
                 classifier.eval()
@@ -131,7 +139,8 @@ def test(task, model, test_loader, classifier=None):
 
             _, predicted = torch.max(output, dim=1)
 
-            correct = predicted.eq(y).cpu().sum().item()
+            if args.cl_mode == 'DeepNCM': correct = predicted.eq(y_converted).cpu().sum().item()
+            else: correct = predicted.eq(y).cpu().sum().item()
             acc.update(correct, len(y))
 
             sys.stdout.write('\r')
@@ -172,9 +181,9 @@ def main():
     model.to(args.device)
 
     # Optimizer and Scheduler
-    optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, weight_decay=2e-4)
+    optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, weight_decay=5e-4)
     # scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[100, 150, 200], gamma=0.5)
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10, eta_min=2e-4)
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10, eta_min=5e-4)
     criterion = nn.CrossEntropyLoss()
 
     feature_size = get_feature_size(model_name)
@@ -184,9 +193,6 @@ def main():
     if classifier_name == 'NCM':
         classifier = NCM.NearestClassMean(feature_size, args.num_classes, device=args.device)
     elif classifier_name == 'DeepNCM':
-        model = resnet.ResNet18_DeepNCM(args.num_classes)
-        model.to(args.device)
-        optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, weight_decay=2e-4)
         classifier = None
     elif classifier_name == 'SLDA':
         classifier = SLDA.StreamingLDA(feature_size, args.num_classes, device=args.device)
