@@ -23,19 +23,18 @@ parser.add_argument('--device', type=int, default=0)
 parser.add_argument('--device_name', type=str, default='cal_05')
 # Dataset Settings
 parser.add_argument('--root', type=str, default='./data/')
-parser.add_argument('--dataset', default='CIFAR10', choices=['MNIST', 'CIFAR10', 'CIFAR100', 'HAR'])
+parser.add_argument('--dataset', default='CIFAR10')
 parser.add_argument('--image_size', type=int, default=32)
 parser.add_argument('--batch_size', type=int, default=512)
 parser.add_argument('--test_size', type=int, default=256)
 parser.add_argument('--num_workers', type=int, default=0)
-parser.add_argument('--mode', type=str, default='vanilla', choices=['vanilla', 'super'])
+parser.add_argument('--mode', type=str, default='vanilla')
 # Model Settings
-parser.add_argument('--model_name', type=str, default='ResNet18', choices=['ResNet18', 'ResNet18_HAR', 'ResNet18_DeepNCM', 'ImageNet_ResNet', 'mobilenet_v3_small', 'mobilenet_v3_large'])
-parser.add_argument("--pre_trained", default=False, action='store_true')
+parser.add_argument('--model_name', type=str, default='ImageNet_ResNet')
+parser.add_argument("--pre_trained", default=True)
 parser.add_argument('--epoch', type=int, default=10)
 parser.add_argument('--lr', '--learning_rate', type=float, default=0.1)
 parser.add_argument('--num_classes', type=int, default=10)
-parser.add_argument('--buffer_size', type=int, default=500, help="size of buffer for replay")
 # CL Settings
 parser.add_argument('--cl_mode', type=str, default='FC', choices=['FC', 'Fine-tuning', 'SLDA', 'NCM', 'DeepNCM', 'Replay'])
 parser.add_argument('--class_increment', type=int, default=1)
@@ -56,10 +55,7 @@ def train(epoch, model, train_loader, criterion, optimizer, classifier=None):
         y = y.type(torch.LongTensor)
         x, y = x.to(args.device).float(), y.to(args.device)
 
-        if classifier is None and args.pre_trained is False and args.cl_mode == 'FC':
-            logits = model(x) # FC
-        
-        elif args.cl_mode == 'NCM' or args.cl_mode == 'SLDA':
+        if args.cl_mode == 'NCM' or args.cl_mode == 'SLDA':
             model.eval()
             feature = model(x)
             classifier.train_(feature, y)
@@ -74,23 +70,9 @@ def train(epoch, model, train_loader, criterion, optimizer, classifier=None):
             # Convert labels to match the order seen by the classifier
             y_converted = model.linear.convert_labels(y).to(args.device)
         
-        else:
-            model.eval()
-            classifier.to(args.device) # Fine-tuning
-            classifier.train()
-
-            feature = model(x) # Fine-tuning using FC
-            logits = classifier(feature)
-
         if args.cl_mode != 'NCM' and args.cl_mode != 'SLDA':
-            if args.cl_mode == 'DeepNCM':
-                print('\n', logits)
-                print(y_converted)
-                loss = criterion(logits, y_converted)
-            else:
-                print('\n', logits)
-                print(y)
-                loss = criterion(logits, y)
+            if args.cl_mode == 'DeepNCM': loss = criterion(logits, y_converted)
+            else: loss = criterion(logits, y)
 
             _, predicted = torch.max(logits, dim=1)
 
@@ -200,15 +182,6 @@ def main():
         classifier = NCM.NearestClassMean(feature_size, args.num_classes, device=args.device)
     elif classifier_name == 'DeepNCM':
         classifier = None
-    elif classifier_name == 'SLDA':
-        classifier = SLDA.StreamingLDA(feature_size, args.num_classes, device=args.device)
-    elif classifier_name == 'Fine-tuning' and args.pre_trained:  
-        classifier = Softmax.SoftmaxLayer(feature_size, args.num_classes) # fine-tuning
-        optimizer = optim.SGD(classifier.parameters(), lr=args.lr, momentum=0.9, weight_decay=5e-4)
-        # scheduler = optim.lr_scheduler.MultiStepLR(optimizer, setp_size=[100, 150, 200], gamma=0.5)
-        scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10, eta_min=2e-4)
-    else:
-        classifier = None # full training
 
     # For plotting the logs
     logger = SSCL_logger('logs/' + args.dataset + '/' + args.device_name, args.cl_mode)
